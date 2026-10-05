@@ -75,6 +75,18 @@
 #' not an optimal joint estimator: with heavy, non-random missingness the
 #' dependence structure is an approximation.
 #'
+#' *Unidentified pairs.* If two variables are observed together in fewer than
+#' 3 rows (e.g. questions from different survey modules), their correlation
+#' cannot be estimated (with 2 rows it is trivially \eqn{\pm 1}). Such
+#' entries are not set to zero, which would assert independence and, through
+#' the projection, distort the identified entries. They are filled by the
+#' maximum-determinant positive-definite completion of the identified
+#' entries (Dempster, 1972), which keeps every identified correlation and
+#' makes the pair conditionally independent given the other variables. If
+#' the identified entries cannot be completed, the unknown entries fall back
+#' to 0. A warning reports how many pairs were affected, and
+#' `copula_correlation(fit, what = "n_pair")` gives the pairwise counts.
+#'
 #' *t-copula degrees of freedom.* With the correlation matrix held fixed,
 #' `df` is chosen by profile likelihood over the grid
 #' 2, 3, 4, 5, 6, 8, 10, 15, 20, 30, 50, 100 using the complete rows (at most
@@ -89,6 +101,9 @@
 #' Sklar, A. (1959). Fonctions de répartition à n dimensions et leurs marges.
 #' *Publications de l'Institut de Statistique de l'Université de Paris*, 8,
 #' 229--231.
+#'
+#' Dempster, A. P. (1972). Covariance selection. *Biometrics*, 28(1),
+#' 157--175. \doi{10.2307/2528966}
 #'
 #' Rüschendorf, L. (2009). On the distributional transform, Sklar's theorem,
 #' and the empirical copula process. *Journal of Statistical Planning and
@@ -185,10 +200,19 @@ fit_synthesizer.data.frame <- function(data,
                    counts = as.integer(counts), models = models)
   }
 
+  mods <- c(list(pooled), if (!is.null(strata)) strata$models)
+  mods <- mods[!vapply(mods, is.null, logical(1))]
+  # correlations of pairs never (or almost never) observed together
+  n_unid <- vapply(mods, function(m) m$copula$unidentified %||% 0L, integer(1))
+  if (any(n_unid > 0L)) {
+    warning(sprintf(paste0("%d pair(s) of variables are observed together in fewer than 3 rows ",
+                           "(in %d of %d fitted model(s)); their copula correlations are not ",
+                           "identified and were filled by maximum-determinant completion. ",
+                           "See copula_correlation(fit, what = \"n_pair\")."),
+                    max(n_unid), sum(n_unid > 0L), length(mods)), call. = FALSE)
+  }
   # t copula: say so when df could not be estimated (too few complete rows)
   if (copula == "t") {
-    mods <- c(list(pooled), if (!is.null(strata)) strata$models)
-    mods <- mods[!vapply(mods, is.null, logical(1))]
     fixed <- vapply(mods, function(m) identical(m$copula$df_estimated, FALSE), logical(1))
     if (any(fixed)) {
       warning(sprintf(paste0("t copula: fewer than 10 complete rows in %d of %d fitted model(s); ",
@@ -550,15 +574,24 @@ simulate.sp_ts_synthesizer <- simulate.sp_synthesizer
 #' Inspect a fitted synthesizer
 #'
 #' `copula_correlation()` returns the (latent) copula correlation matrix of a
-#' fitted model; `summary()` returns a table describing how each column is
-#' modelled.
+#' fitted model, or with `what = "n_pair"` the number of rows on which each
+#' pairwise estimate is based; `summary()` returns a table describing how
+#' each column is modelled.
+#'
+#' Pairs of variables observed together in fewer than 3 rows have an
+#' *unidentified* correlation. It is not estimated from data but filled in by
+#' the maximum-determinant completion (see the "Estimation details" section
+#' of [fit_synthesizer()]); such entries have `n_pair < 3`.
 #'
 #' @param object A fitted `sp_synthesizer`.
 #' @param stratum Optional stratum label for stratified models (as shown by
 #'   `summary()`); defaults to the pooled model.
 #' @param include_missing Include the missingness indicators in the matrix?
+#' @param what `"correlation"` (default) or `"n_pair"` (an integer matrix of
+#'   jointly observed rows; the diagonal is the number of observed values).
 #' @param ... Unused.
-#' @return `copula_correlation()`: a correlation matrix. `summary()`: an
+#' @return `copula_correlation()`: a correlation matrix (or a count matrix
+#'   for `what = "n_pair"`). `summary()`: an
 #'   object of class `summary.sp_synthesizer` (a list with a `columns` data
 #'   frame).
 #' @examples
@@ -566,7 +599,9 @@ simulate.sp_ts_synthesizer <- simulate.sp_synthesizer
 #' round(copula_correlation(fit), 2)
 #' summary(fit)
 #' @export
-copula_correlation <- function(object, stratum = NULL, include_missing = FALSE) {
+copula_correlation <- function(object, stratum = NULL, include_missing = FALSE,
+                               what = c("correlation", "n_pair")) {
+  what <- match.arg(what)
   if (!inherits(object, "sp_synthesizer")) {
     stop("'object' must be an sp_synthesizer.", call. = FALSE)
   }
@@ -577,7 +612,7 @@ copula_correlation <- function(object, stratum = NULL, include_missing = FALSE) 
     if (is.na(i)) stop("Unknown stratum: ", stratum, call. = FALSE)
     mod <- object$strata$models[[i]] %||% object$pooled
   }
-  R <- mod$copula$R
+  R <- if (what == "n_pair") mod$copula$n_pair else mod$copula$R
   if (!include_missing) {
     keep <- !startsWith(colnames(R), ".missing_")
     R <- R[keep, keep, drop = FALSE]
@@ -615,7 +650,8 @@ summary.sp_synthesizer <- function(object, ...) {
   structure(list(columns = cols, strata = strata, settings = object$settings,
                  n_train = object$n_train,
                  df = object$pooled$copula$df,
-                 df_estimated = object$pooled$copula$df_estimated),
+                 df_estimated = object$pooled$copula$df_estimated,
+                 unidentified = object$pooled$copula$unidentified %||% 0L),
             class = "summary.sp_synthesizer")
 }
 
@@ -627,7 +663,12 @@ print.summary.sp_synthesizer <- function(x, ...) {
     cat(sprintf(" (df = %g%s)", x$df,
                 if (identical(x$df_estimated, FALSE)) ", fixed: too few complete rows" else ""))
   }
-  cat(" | missing data:", x$settings$missing, "\n\n")
+  cat(" | missing data:", x$settings$missing, "\n")
+  if (isTRUE(x$unidentified > 0L)) {
+    cat(sprintf("Unidentified pairwise correlations (filled by completion): %d\n",
+                x$unidentified))
+  }
+  cat("\n")
   cols <- x$columns
   cols$missing <- .fmt_pct(cols$missing)
   print(cols, row.names = FALSE)

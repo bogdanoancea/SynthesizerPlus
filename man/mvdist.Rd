@@ -30,7 +30,10 @@ r_mvmixture(n, weights, means, sigmas, return_component = FALSE, seed = NULL)
 \item{sigma, omega}{Covariance (scale) matrix: square, finite, symmetric
 and positive semi-definite. \code{omega} must also have a strictly positive
 diagonal, because the skew-normal is parameterised through the
-correlation matrix \eqn{\bar\Omega = \omega^{-1}\Omega\omega^{-1}}.}
+correlation matrix \eqn{\bar\Omega = \omega^{-1}\Omega\omega^{-1}}.
+\code{sigma} may be singular (positive semi-definite), giving a degenerate
+normal or \emph{t} distribution; \code{omega} must be positive definite, as in
+the standard definition of the skew-normal density.}
 
 \item{seed}{Optional random seed.}
 

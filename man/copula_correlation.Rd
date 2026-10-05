@@ -5,7 +5,12 @@
 \alias{summary.sp_synthesizer}
 \title{Inspect a fitted synthesizer}
 \usage{
-copula_correlation(object, stratum = NULL, include_missing = FALSE)
+copula_correlation(
+  object,
+  stratum = NULL,
+  include_missing = FALSE,
+  what = c("correlation", "n_pair")
+)
 
 \method{summary}{sp_synthesizer}(object, ...)
 }
@@ -17,17 +22,28 @@ copula_correlation(object, stratum = NULL, include_missing = FALSE)
 
 \item{include_missing}{Include the missingness indicators in the matrix?}
 
+\item{what}{\code{"correlation"} (default) or \code{"n_pair"} (an integer matrix of
+jointly observed rows; the diagonal is the number of observed values).}
+
 \item{...}{Unused.}
 }
 \value{
-\code{copula_correlation()}: a correlation matrix. \code{summary()}: an
+\code{copula_correlation()}: a correlation matrix (or a count matrix
+for \code{what = "n_pair"}). \code{summary()}: an
 object of class \code{summary.sp_synthesizer} (a list with a \code{columns} data
 frame).
 }
 \description{
 \code{copula_correlation()} returns the (latent) copula correlation matrix of a
-fitted model; \code{summary()} returns a table describing how each column is
-modelled.
+fitted model, or with \code{what = "n_pair"} the number of rows on which each
+pairwise estimate is based; \code{summary()} returns a table describing how
+each column is modelled.
+}
+\details{
+Pairs of variables observed together in fewer than 3 rows have an
+\emph{unidentified} correlation. It is not estimated from data but filled in by
+the maximum-determinant completion (see the "Estimation details" section
+of \code{\link[=fit_synthesizer]{fit_synthesizer()}}); such entries have \code{n_pair < 3}.
 }
 \examples{
 fit <- fit_synthesizer(airquality)

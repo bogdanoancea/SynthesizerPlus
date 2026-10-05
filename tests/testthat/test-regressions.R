@@ -312,3 +312,105 @@ test_that("t-copula df fallback is flagged and warned about", {
   expect_true(s2$pooled$copula$df %in% c(2, 3, 4, 5, 6, 8, 10, 15, 20, 30, 50, 100))
   expect_true(is.na(fit_synthesizer(big)$pooled$copula$df_estimated))
 })
+
+# ---- 0.2.4: fourth external review ----------------------------------------
+
+test_that(".check_prob() rejects every non-finite value", {
+  for (v in list(NaN, NA_real_, Inf, -Inf, NA)) {
+    expect_error(SynthesizerPlus:::.check_prob(v, "p"), "single number")
+  }
+  expect_identical(SynthesizerPlus:::.check_prob(0.3, "p"), 0.3)
+})
+
+split_modules <- function(n = 300, rho = 0.8, seed = 1) {
+  z <- r_mvnorm(n, sigma = make_corr(3, rho = rho), seed = seed)
+  d <- data.frame(a = z[, 1], b = z[, 2], c = z[, 3])
+  h <- n %/% 2
+  d$a[seq_len(h)] <- NA                       # a and b never observed together
+  d$b[(h + 1):n] <- NA
+  d
+}
+
+test_that("unidentified pairwise correlations are completed, counted and reported", {
+  d <- split_modules()
+  for (fam in c("gaussian", "t")) {
+    w <- testthat::capture_warnings(fit <- fit_synthesizer(d, copula = fam, missing = "drop"))
+    expect_true(any(grepl("not identified", w)))
+    # no complete rows at all, so the t df is the documented fallback
+    if (fam == "t") expect_true(any(grepl("df was not estimated", w)))
+    np <- copula_correlation(fit, what = "n_pair")
+    expect_identical(np["a", "b"], 0L)
+    expect_identical(np["a", "c"], 150L)
+    expect_identical(unname(diag(np)), c(150L, 150L, 300L))
+    expect_identical(fit$pooled$copula$unidentified, 1L)
+    R <- copula_correlation(fit)
+    # max-determinant completion: conditional independence of a and b given c,
+    # i.e. r_ab = r_ac * r_bc, instead of the arbitrary value 0
+    expect_equal(R["a", "b"], R["a", "c"] * R["b", "c"], tolerance = 1e-6)
+    expect_gt(R["a", "b"], 0.4)
+    expect_gt(min(eigen(R, only.values = TRUE)$values), 0)
+  }
+  expect_output(print(summary(suppressWarnings(fit_synthesizer(d, missing = "drop")))),
+                "Unidentified pairwise correlations")
+  # fully observed data: no warning, nothing unidentified
+  expect_silent(f2 <- fit_synthesizer(iris))
+  expect_identical(f2$pooled$copula$unidentified, 0L)
+  expect_true(all(copula_correlation(f2, what = "n_pair") == 150L))
+})
+
+test_that("a pair seen together in only 2 rows does not distort identified pairs", {
+  d <- split_modules()
+  ref <- suppressWarnings(fit_synthesizer(d, missing = "drop"))
+  z <- r_mvnorm(300, sigma = make_corr(3, rho = 0.8), seed = 1)
+  d$b[151:152] <- z[151:152, 2]                # 2 joint rows: |r| = 1 trivially
+  expect_warning(fit <- fit_synthesizer(d, missing = "drop"), "fewer than 3 rows")
+  R0 <- copula_correlation(ref)
+  R1 <- copula_correlation(fit)
+  expect_equal(R1["a", "c"], R0["a", "c"], tolerance = 0.02)
+  expect_equal(R1["a", "b"], R1["a", "c"] * R1["b", "c"], tolerance = 1e-6)
+})
+
+test_that("completion keeps identified entries and falls back to zero if impossible", {
+  cc <- SynthesizerPlus:::.complete_corr
+  R <- matrix(c(1, NA, 0.5, NA, 1, 0.4, 0.5, 0.4, 1), 3)
+  unid <- is.na(R)
+  W <- cc(R, unid)
+  expect_equal(W[1, 3], 0.5)
+  expect_equal(W[2, 3], 0.4)
+  expect_equal(W[1, 2], 0.2, tolerance = 1e-8)
+  expect_equal(solve(W)[1, 2], 0, tolerance = 1e-8)   # zero partial correlation
+  # 4 x 4 cycle a-b-c-d-a with a-c, b-d unknown
+  R4 <- diag(4)
+  R4[cbind(c(1, 2, 3, 4), c(2, 3, 4, 1))] <- 0.5
+  R4 <- pmax(R4, t(R4))
+  u4 <- matrix(FALSE, 4, 4)
+  u4[cbind(c(1, 3, 2, 4), c(3, 1, 4, 2))] <- TRUE
+  R4[u4] <- NA
+  W4 <- cc(R4, u4)
+  expect_equal(W4[!u4], R4[!u4], tolerance = 1e-8)
+  expect_equal(solve(W4)[u4], rep(0, 4), tolerance = 1e-7)
+  # identified entries that admit no PD completion -> unknown entries set to 0
+  Rb <- matrix(c(1, 0.99, NA, 0.99, 1, -0.99, NA, -0.99, 1), 3)
+  Rb[1, 3] <- Rb[3, 1] <- NA
+  ub <- is.na(Rb)
+  expect_equal(cc(Rb, ub)[1, 3], -0.9801, tolerance = 1e-6)   # r_13 = r_12 * r_23
+  Rx <- diag(4)
+  Rx[1, 2] <- Rx[2, 1] <- 0.99; Rx[2, 3] <- Rx[3, 2] <- 0.99
+  Rx[1, 3] <- Rx[3, 1] <- -0.99                               # inconsistent triangle
+  Rx[1, 4] <- Rx[4, 1] <- NA
+  ux <- is.na(Rx)
+  expect_identical(cc(Rx, ux)[1, 4], 0)
+  # a variable with no identified partner is independent of all others
+  Ri <- matrix(c(1, NA, NA, NA, 1, 0.6, NA, 0.6, 1), 3)
+  Wi <- cc(Ri, is.na(Ri))
+  expect_equal(Wi[1, ], c(1, 0, 0))
+  expect_equal(Wi[2, 3], 0.6)
+})
+
+test_that("r_mvskewnorm() requires a positive-definite omega", {
+  expect_error(r_mvskewnorm(5, omega = matrix(1, 2, 2), alpha = c(1, 2)), "positive definite")
+  expect_error(r_mvskewnorm(5, omega = matrix(c(1, 1, 0, 1, 1, 0, 0, 0, 1), 3),
+                            alpha = c(1, 0, 0)), "positive definite")
+  # PSD-but-singular sigma stays allowed for the normal and t families
+  expect_silent(r_mvt(5, df = 4, sigma = matrix(1, 2, 2), seed = 1))
+})

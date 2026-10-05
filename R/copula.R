@@ -2,10 +2,14 @@
 
 # Fit an elliptical copula to a matrix of pseudo-observations `U` (may contain
 # NA; correlations are estimated from pairwise complete observations).
+# Pairs observed together in fewer than `min_pair_obs` rows (or whose
+# correlation is not finite) are *unidentified*: their correlation is filled
+# by the maximum-determinant completion of the identified entries (falling
+# back to 0 if that fails). The counts are kept in `n_pair`.
 .fit_copula <- function(U, family = c("gaussian", "t", "independence"),
                         pd_method = c("auto", "higham", "eigen", "none"),
                         df_grid = c(2, 3, 4, 5, 6, 8, 10, 15, 20, 30, 50, 100),
-                        max_rows = 5000L) {
+                        max_rows = 5000L, min_pair_obs = 3L) {
   family <- match.arg(family)
   pd_method <- match.arg(pd_method)
   d <- ncol(U)
@@ -13,23 +17,35 @@
   if (family == "independence" || d < 2L) {
     R <- diag(d)
     dimnames(R) <- list(nm, nm)
+    obs <- !is.na(U)
+    np <- crossprod(obs + 0)
+    storage.mode(np) <- "integer"
+    dimnames(np) <- list(nm, nm)
     return(list(family = "independence", R = R, df = Inf, df_estimated = NA,
-                chol = R))
+                chol = R, n_pair = np, unidentified = 0L))
   }
 
   if (family == "gaussian") {
+    Ue <- U
     Z <- stats::qnorm(U)
     R <- suppressWarnings(stats::cor(Z, use = "pairwise.complete.obs"))
   } else {
     # Kendall's tau inversion is robust for the t copula: rho = sin(pi/2 tau)
-    Us <- if (nrow(U) > 2000L) U[sample.int(nrow(U), 2000L), , drop = FALSE] else U
-    tau <- suppressWarnings(stats::cor(Us, method = "kendall",
+    Ue <- if (nrow(U) > 2000L) U[sample.int(nrow(U), 2000L), , drop = FALSE] else U
+    tau <- suppressWarnings(stats::cor(Ue, method = "kendall",
                                        use = "pairwise.complete.obs"))
     R <- sin(pi / 2 * tau)
   }
-  R[!is.finite(R)] <- 0
+  # number of rows on which each pairwise estimate is based
+  np <- crossprod(!is.na(Ue) + 0)
+  storage.mode(np) <- "integer"
+  dimnames(np) <- list(nm, nm)
+  unid <- (np < min_pair_obs) | !is.finite(R)
+  diag(unid) <- FALSE
+  R[unid] <- NA
   diag(R) <- 1
   R <- (R + t(R)) / 2
+  if (any(unid)) R <- .complete_corr(R, unid)
   R <- .make_pd(R, method = pd_method)
   dimnames(R) <- list(nm, nm)
 
@@ -44,7 +60,52 @@
     stop("The copula correlation matrix is not positive definite (variables are ",
          "perfectly dependent). Use pd_method = \"auto\" to repair it.", call. = FALSE)
   })
-  list(family = family, R = R, df = df, df_estimated = df_estimated, chol = ch)
+  list(family = family, R = R, df = df, df_estimated = df_estimated, chol = ch,
+       n_pair = np, unidentified = as.integer(sum(unid) / 2))
+}
+
+# Maximum-determinant (maximum-entropy) positive-definite completion of a
+# correlation matrix whose entries flagged in `unid` are unknown: the
+# identified entries are kept and the unknown ones are chosen so that the
+# inverse has zeros there, i.e. the corresponding pairs are conditionally
+# independent given the remaining variables (Dempster 1972, covariance
+# selection; algorithm 17.1 of Hastie, Tibshirani and Friedman 2009).
+# Falls back to 0 for the unknown entries if the identified entries are not
+# completable (inconsistent pairwise estimates) or the iteration fails.
+.complete_corr <- function(R, unid, tol = 1e-10, max_iter = 500L) {
+  zero_fill <- function() {
+    R0 <- R
+    R0[unid] <- 0
+    R0
+  }
+  p <- ncol(R)
+  S <- R
+  S[unid] <- 0
+  W <- S
+  ok <- tryCatch({
+    for (it in seq_len(max_iter)) {
+      W_old <- W
+      for (j in seq_len(p)) {
+        oth <- seq_len(p)[-j]
+        nb <- oth[!unid[j, oth]]
+        w12 <- if (length(nb)) {
+          W[oth, nb, drop = FALSE] %*% solve(W[nb, nb, drop = FALSE], S[nb, j])
+        } else {
+          rep(0, p - 1L)
+        }
+        W[oth, j] <- w12
+        W[j, oth] <- w12
+      }
+      if (max(abs(W - W_old)) < tol) break
+    }
+    all(is.finite(W)) &&
+      min(eigen(W, symmetric = TRUE, only.values = TRUE)$values) > 0 &&
+      max(abs(W[!unid] - S[!unid])) < 1e-6
+  }, error = function(e) FALSE)
+  if (!isTRUE(ok)) return(zero_fill())
+  W <- (W + t(W)) / 2
+  diag(W) <- 1
+  W
 }
 
 # Profile likelihood for the degrees of freedom of a t copula on a grid (R held

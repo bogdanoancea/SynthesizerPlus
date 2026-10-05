@@ -114,6 +114,18 @@ correlation matrix by default). The projection guarantees a valid model,
 not an optimal joint estimator: with heavy, non-random missingness the
 dependence structure is an approximation.
 
+\emph{Unidentified pairs.} If two variables are observed together in fewer than
+3 rows (e.g. questions from different survey modules), their correlation
+cannot be estimated (with 2 rows it is trivially \eqn{\pm 1}). Such
+entries are not set to zero, which would assert independence and, through
+the projection, distort the identified entries. They are filled by the
+maximum-determinant positive-definite completion of the identified
+entries (Dempster, 1972), which keeps every identified correlation and
+makes the pair conditionally independent given the other variables. If
+the identified entries cannot be completed, the unknown entries fall back
+to 0. A warning reports how many pairs were affected, and
+\code{copula_correlation(fit, what = "n_pair")} gives the pairwise counts.
+
 \emph{t-copula degrees of freedom.} With the correlation matrix held fixed,
 \code{df} is chosen by profile likelihood over the grid
 2, 3, 4, 5, 6, 8, 10, 15, 20, 30, 50, 100 using the complete rows (at most
@@ -137,6 +149,9 @@ colSums(is.na(generate(fit_aq, seed = 2)))
 Sklar, A. (1959). Fonctions de répartition à n dimensions et leurs marges.
 \emph{Publications de l'Institut de Statistique de l'Université de Paris}, 8,
 229--231.
+
+Dempster, A. P. (1972). Covariance selection. \emph{Biometrics}, 28(1),
+157--175. \doi{10.2307/2528966}
 
 Rüschendorf, L. (2009). On the distributional transform, Sklar's theorem,
 and the empirical copula process. \emph{Journal of Statistical Planning and

@@ -55,7 +55,7 @@
 }
 
 .check_prob <- function(x, name) {
-  if (!is.numeric(x) || length(x) != 1L || is.na(x) || x < 0 || x > 1) {
+  if (!is.numeric(x) || length(x) != 1L || !is.finite(x) || x < 0 || x > 1) {
     stop(sprintf("'%s' must be a single number in [0, 1].", name), call. = FALSE)
   }
   x

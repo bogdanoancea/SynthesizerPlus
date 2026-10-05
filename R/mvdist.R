@@ -154,6 +154,9 @@ make_corr <- function(d, type = c("exchangeable", "ar1", "toeplitz", "random", "
 #'   and positive semi-definite. `omega` must also have a strictly positive
 #'   diagonal, because the skew-normal is parameterised through the
 #'   correlation matrix \eqn{\bar\Omega = \omega^{-1}\Omega\omega^{-1}}.
+#'   `sigma` may be singular (positive semi-definite), giving a degenerate
+#'   normal or *t* distribution; `omega` must be positive definite, as in
+#'   the standard definition of the skew-normal density.
 #' @param df Degrees of freedom (`Inf` gives the normal distribution).
 #' @param meanlog,sigmalog Mean vector and covariance matrix on the log scale.
 #' @param alpha Shape (skewness) vector for `r_mvskewnorm()`; concentration
@@ -233,6 +236,12 @@ r_mvskewnorm <- function(n, xi = NULL, omega, alpha, seed = NULL) {
   # must be strictly positive
   if (any(diag(omega) <= 0)) {
     stop("'omega' must have a strictly positive diagonal.", call. = FALSE)
+  }
+  # the Azzalini--Dalla Valle density requires a positive-definite scale
+  # matrix; degenerate (singular) skew-normals are not supported
+  if (inherits(try(chol(omega), silent = TRUE), "try-error")) {
+    stop("'omega' must be positive definite (singular skew-normal distributions are not supported).",
+         call. = FALSE)
   }
   w <- sqrt(diag(omega))
   Obar <- omega / outer(w, w)

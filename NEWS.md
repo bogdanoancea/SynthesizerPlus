@@ -1,3 +1,28 @@
+# SynthesizerPlus 0.2.4
+
+Fixes from a fourth code review.
+
+* Unidentified copula correlations. A pair of variables observed together
+  in fewer than 3 rows (e.g. questions from different survey modules) used
+  to get correlation 0, read as estimated independence. Worse, a pair seen
+  together in exactly 2 rows got a spurious correlation of +/-1, and its
+  projection to a valid matrix distorted the *well-estimated* pairs. Such
+  pairs are now filled by the maximum-determinant positive-definite
+  completion of the identified entries (Dempster, 1972). This keeps every
+  identified correlation and makes the pair conditionally independent given
+  the other variables; the unknown entries fall back to 0 only if no
+  completion exists. `fit_synthesizer()` warns when this happens, the
+  fitted copula stores the pairwise counts (`n_pair`) and the number of
+  unidentified pairs, `copula_correlation(fit, what = "n_pair")` returns
+  the counts, and `summary()` reports them. Fully observed data are
+  unaffected.
+* `r_mvskewnorm()` requires a positive-definite `omega`, as in the standard
+  definition of the skew-normal density; singular `sigma` remains allowed
+  for `r_mvnorm()`, `r_mvt()` and `r_mvlnorm()` (degenerate distributions),
+  and this is now documented.
+* `.check_prob()` (used for `closeness`, `close_quantile`, ...) rejects
+  non-finite values explicitly, consistent with the other validators.
+
 # SynthesizerPlus 0.2.3
 
 Fixes from a third code review (robustness and transparency; no change to
