@@ -31,8 +31,7 @@
 #'   logical, character, factor, `Date`, `POSIXct`) or `ts` object. Time
 #'   series are handled by [fit_synthesizer.ts()].
 #' @param copula Dependence model: `"gaussian"` (default), `"t"` (heavier
-#'   joint tails; degrees of freedom estimated by profile likelihood) or
-#'   `"independence"`.
+#'   joint tails) or `"independence"`. See *Estimation details*.
 #' @param by Optional character vector of column names used to stratify the
 #'   model. Each stratum gets its own marginals and copula; strata are sampled
 #'   in proportion to their training size.
@@ -61,6 +60,28 @@
 #' @param ... Further arguments passed to methods.
 #'
 #' @return An object of class `sp_synthesizer`.
+#'
+#' @section Estimation details:
+#' *Latent correlations.* For the Gaussian copula the latent correlation
+#' matrix is the Pearson correlation of the normal scores
+#' \eqn{\Phi^{-1}(U)}; for the t copula it is obtained by inverting Kendall's
+#' tau, \eqn{\rho = \sin(\pi\tau/2)} (on a random subsample of at most
+#' 2000 rows). With incomplete data both are computed from **pairwise
+#' complete observations**. Pairwise estimates based on different subsets of
+#' rows need not form a coherent joint estimate, and the resulting matrix
+#' need not be positive definite; it is then projected onto the set of
+#' valid correlation matrices according to `pd_method` (Higham's nearest
+#' correlation matrix by default). The projection guarantees a valid model,
+#' not an optimal joint estimator: with heavy, non-random missingness the
+#' dependence structure is an approximation.
+#'
+#' *t-copula degrees of freedom.* With the correlation matrix held fixed,
+#' `df` is chosen by profile likelihood over the grid
+#' 2, 3, 4, 5, 6, 8, 10, 15, 20, 30, 50, 100 using the complete rows (at most
+#' 5000), so it is a discrete grid estimate rather than a continuous maximum
+#' likelihood estimate. If fewer than 10 complete rows are available, `df`
+#' is **not estimated** and is fixed at 10; a warning is issued and the
+#' fitted copula stores `df_estimated = FALSE` (see [summary()]).
 #'
 #' @seealso [generate()], [synthesize()], [compare_synthetic()]
 #'
@@ -162,6 +183,18 @@ fit_synthesizer.data.frame <- function(data,
     strata <- list(keys = keys, values = values,
                    probs = counts / sum(counts),
                    counts = as.integer(counts), models = models)
+  }
+
+  # t copula: say so when df could not be estimated (too few complete rows)
+  if (copula == "t") {
+    mods <- c(list(pooled), if (!is.null(strata)) strata$models)
+    mods <- mods[!vapply(mods, is.null, logical(1))]
+    fixed <- vapply(mods, function(m) identical(m$copula$df_estimated, FALSE), logical(1))
+    if (any(fixed)) {
+      warning(sprintf(paste0("t copula: fewer than 10 complete rows in %d of %d fitted model(s); ",
+                             "df was not estimated there and is fixed at 10."),
+                      sum(fixed), length(fixed)), call. = FALSE)
+    }
   }
 
   structure(list(
@@ -581,7 +614,8 @@ summary.sp_synthesizer <- function(object, ...) {
   }
   structure(list(columns = cols, strata = strata, settings = object$settings,
                  n_train = object$n_train,
-                 df = object$pooled$copula$df),
+                 df = object$pooled$copula$df,
+                 df_estimated = object$pooled$copula$df_estimated),
             class = "summary.sp_synthesizer")
 }
 
@@ -589,7 +623,10 @@ summary.sp_synthesizer <- function(object, ...) {
 print.summary.sp_synthesizer <- function(x, ...) {
   cat("Synthesizer trained on", x$n_train, "rows\n")
   cat("Copula:", x$settings$copula)
-  if (is.finite(x$df)) cat(sprintf(" (df = %g)", x$df))
+  if (is.finite(x$df)) {
+    cat(sprintf(" (df = %g%s)", x$df,
+                if (identical(x$df_estimated, FALSE)) ", fixed: too few complete rows" else ""))
+  }
   cat(" | missing data:", x$settings$missing, "\n\n")
   cols <- x$columns
   cols$missing <- .fmt_pct(cols$missing)

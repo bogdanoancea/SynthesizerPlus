@@ -35,8 +35,7 @@ series are handled by \code{\link[=fit_synthesizer.ts]{fit_synthesizer.ts()}}.}
 \item{...}{Further arguments passed to methods.}
 
 \item{copula}{Dependence model: \code{"gaussian"} (default), \code{"t"} (heavier
-joint tails; degrees of freedom estimated by profile likelihood) or
-\code{"independence"}.}
+joint tails) or \code{"independence"}. See \emph{Estimation details}.}
 
 \item{by}{Optional character vector of column names used to stratify the
 model. Each stratum gets its own marginals and copula; strata are sampled
@@ -100,6 +99,30 @@ groups, with a pooled fallback for small groups.
 Use \code{\link[=generate]{generate()}} to draw synthetic data from the fitted model, or
 \code{\link[=synthesize]{synthesize()}} to fit and generate in one step.
 }
+\section{Estimation details}{
+
+\emph{Latent correlations.} For the Gaussian copula the latent correlation
+matrix is the Pearson correlation of the normal scores
+\eqn{\Phi^{-1}(U)}; for the t copula it is obtained by inverting Kendall's
+tau, \eqn{\rho = \sin(\pi\tau/2)} (on a random subsample of at most
+2000 rows). With incomplete data both are computed from \strong{pairwise
+complete observations}. Pairwise estimates based on different subsets of
+rows need not form a coherent joint estimate, and the resulting matrix
+need not be positive definite; it is then projected onto the set of
+valid correlation matrices according to \code{pd_method} (Higham's nearest
+correlation matrix by default). The projection guarantees a valid model,
+not an optimal joint estimator: with heavy, non-random missingness the
+dependence structure is an approximation.
+
+\emph{t-copula degrees of freedom.} With the correlation matrix held fixed,
+\code{df} is chosen by profile likelihood over the grid
+2, 3, 4, 5, 6, 8, 10, 15, 20, 30, 50, 100 using the complete rows (at most
+5000), so it is a discrete grid estimate rather than a continuous maximum
+likelihood estimate. If fewer than 10 complete rows are available, \code{df}
+is \strong{not estimated} and is fixed at 10; a warning is issued and the
+fitted copula stores \code{df_estimated = FALSE} (see \code{\link[=summary]{summary()}}).
+}
+
 \examples{
 fit <- fit_synthesizer(iris)
 fit

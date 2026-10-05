@@ -47,7 +47,8 @@ test_that("input validation of fit_synthesizer()", {
 test_that("copula estimation corner cases", {
   # t copula with very few complete rows uses a default df
   d <- data.frame(a = c(rnorm(8), rep(NA, 20)), b = rnorm(28))
-  expect_equal(fit_synthesizer(d, copula = "t", missing = "drop")$pooled$copula$df, 10)
+  expect_warning(fit <- fit_synthesizer(d, copula = "t", missing = "drop"), "df was not estimated")
+  expect_equal(fit$pooled$copula$df, 10)
   # pd_method = "none" on a valid matrix
   expect_s3_class(fit_synthesizer(iris, pd_method = "none"), "sp_synthesizer")
   expect_error(fit_synthesizer(data.frame(a = 1:30, b = 1:30, c = -(1:30)), pd_method = "none"),

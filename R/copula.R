@@ -13,7 +13,8 @@
   if (family == "independence" || d < 2L) {
     R <- diag(d)
     dimnames(R) <- list(nm, nm)
-    return(list(family = "independence", R = R, df = Inf, chol = R))
+    return(list(family = "independence", R = R, df = Inf, df_estimated = NA,
+                chol = R))
   }
 
   if (family == "gaussian") {
@@ -33,21 +34,28 @@
   dimnames(R) <- list(nm, nm)
 
   df <- Inf
+  df_estimated <- NA
   if (family == "t") {
-    df <- .estimate_t_df(U, R, df_grid = df_grid, max_rows = max_rows)
+    est <- .estimate_t_df(U, R, df_grid = df_grid, max_rows = max_rows)
+    df <- est$df
+    df_estimated <- est$estimated
   }
   ch <- tryCatch(chol(R), error = function(e) {
     stop("The copula correlation matrix is not positive definite (variables are ",
          "perfectly dependent). Use pd_method = \"auto\" to repair it.", call. = FALSE)
   })
-  list(family = family, R = R, df = df, chol = ch)
+  list(family = family, R = R, df = df, df_estimated = df_estimated, chol = ch)
 }
 
-# Profile likelihood for the degrees of freedom of a t copula on a grid
-.estimate_t_df <- function(U, R, df_grid, max_rows = 5000L) {
+# Profile likelihood for the degrees of freedom of a t copula on a grid (R held
+# fixed at its Kendall's-tau estimate). Returns list(df, estimated): with fewer
+# than `min_rows` complete rows nothing is estimated and df is fixed at
+# `fallback` (estimated = FALSE).
+.estimate_t_df <- function(U, R, df_grid, max_rows = 5000L, min_rows = 10L,
+                           fallback = 10) {
   cc <- stats::complete.cases(U)
   Uc <- U[cc, , drop = FALSE]
-  if (nrow(Uc) < 10L) return(10)
+  if (nrow(Uc) < min_rows) return(list(df = fallback, estimated = FALSE))
   if (nrow(Uc) > max_rows) Uc <- Uc[sample.int(nrow(Uc), max_rows), , drop = FALSE]
   Uc <- pmin(pmax(Uc, 1e-10), 1 - 1e-10)
   d <- ncol(Uc)
@@ -61,7 +69,7 @@
     lmarg <- rowSums(stats::dt(X, df = nu, log = TRUE))
     sum(lmv - lmarg)
   }, numeric(1))
-  df_grid[which.max(ll)]
+  list(df = df_grid[which.max(ll)], estimated = TRUE)
 }
 
 # Draw n x d uniforms from a fitted copula. `dependence` in [0, 2] scales the

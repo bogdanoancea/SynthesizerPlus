@@ -250,3 +250,65 @@ test_that("comparison output flags an AUC well below 0.5", {
   ok <- compare_synthetic(iris, synthesize(iris, seed = 1), metrics = "utility", seed = 2)
   expect_false(any(grepl("copy real", capture.output(print(ok)))))
 })
+
+# ---- 0.2.3: third external review -----------------------------------------
+
+test_that("covariance / scale matrices are validated with clear messages", {
+  for (f in list(function(S) r_mvnorm(10, sigma = S),
+                 function(S) r_mvt(10, df = 5, sigma = S),
+                 function(S) r_mvlnorm(10, sigmalog = S),
+                 function(S) r_mvskewnorm(10, omega = S, alpha = c(1, 1)))) {
+    expect_error(f(matrix(1:6, 2, 3)), "square")
+    expect_error(f(matrix(numeric(0), 0, 0)), "square")
+    expect_error(f(matrix("a", 2, 2)), "numeric")
+    expect_error(f(matrix(c(1, NA, NA, 1), 2)), "finite")
+    expect_error(f(matrix(c(1, Inf, Inf, 1), 2)), "finite")
+    expect_error(f(matrix(c(1, 0.5, 0.2, 1), 2)), "symmetric")
+    expect_error(f(matrix(c(1, 2, 2, 1), 2)), "semi-definite")
+  }
+  expect_error(r_mvmixture(10, 1, list(c(0, 0)), list(matrix(c(1, 0.5, 0.2, 1), 2))),
+               "Component 1: 'sigma' must be symmetric")
+  # singular but PSD covariances remain allowed for the normal family
+  x <- r_mvnorm(50, sigma = matrix(1, 2, 2), seed = 1)
+  expect_equal(x[, 1], x[, 2])
+})
+
+test_that("multivariate generators reject non-finite locations and shapes", {
+  expect_error(r_mvnorm(10, mean = c(Inf, 0), sigma = diag(2)), "finite")
+  expect_error(r_mvnorm(10, mean = c("a", "b"), sigma = diag(2)), "numeric")
+  expect_error(r_mvnorm(10, mean = 1:3, sigma = diag(2)), "incompatible dimensions")
+  expect_error(r_mvt(10, df = 5, mean = c(NA, 0), sigma = diag(2)), "finite")
+  expect_error(r_mvlnorm(10, meanlog = c(NaN, 0), sigmalog = diag(2)), "finite")
+  expect_error(r_mvskewnorm(10, xi = c(0, 0), omega = diag(2), alpha = c(Inf, 1)), "'alpha'.*finite")
+  expect_error(r_mvskewnorm(10, xi = c(NA, 0), omega = diag(2), alpha = c(1, 1)), "'xi'.*finite")
+  expect_error(r_mvskewnorm(10, omega = diag(2), alpha = 1), "'alpha'")
+  expect_error(r_mvmixture(10, 1, list(c(0, Inf)), list(diag(2))), "Component 1.*finite")
+  expect_error(r_mvt(-1, df = 5, sigma = diag(2)), "non-negative")
+})
+
+test_that("skew-normal requires a strictly positive scale diagonal", {
+  S <- matrix(c(0, 0, 0, 1), 2, 2)          # PSD, but zero scale
+  expect_error(r_mvskewnorm(10, omega = S, alpha = c(1, 1)), "positive")
+})
+
+test_that("make_corr(d = 1) is the 1 x 1 identity whatever rho", {
+  expect_identical(make_corr(1, "exchangeable", rho = -5), matrix(1, 1, 1))
+  expect_identical(make_corr(1, "ar1", rho = 0.5, names = "a"),
+                   matrix(1, 1, 1, dimnames = list("a", "a")))
+  expect_identical(make_corr(1, "random"), matrix(1, 1, 1))
+})
+
+test_that("t-copula df fallback is flagged and warned about", {
+  set.seed(1)
+  small <- data.frame(x = rnorm(8), y = rnorm(8))
+  expect_warning(s <- fit_synthesizer(small, copula = "t"), "df was not estimated")
+  expect_identical(s$pooled$copula$df, 10)
+  expect_false(s$pooled$copula$df_estimated)
+  expect_output(print(summary(s)), "fixed: too few complete rows")
+
+  big <- data.frame(x = rnorm(200), y = rnorm(200))
+  expect_silent(s2 <- fit_synthesizer(big, copula = "t"))
+  expect_true(s2$pooled$copula$df_estimated)
+  expect_true(s2$pooled$copula$df %in% c(2, 3, 4, 5, 6, 8, 10, 15, 20, 30, 50, 100))
+  expect_true(is.na(fit_synthesizer(big)$pooled$copula$df_estimated))
+})

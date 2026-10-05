@@ -1,3 +1,36 @@
+# SynthesizerPlus 0.2.3
+
+Fixes from a third code review (robustness and transparency; no change to
+the synthesis model).
+
+* Covariance and scale matrices passed to `r_mvnorm()`, `r_mvt()`,
+  `r_mvlnorm()`, `r_mvskewnorm()` and `r_mvmixture()` are validated by one
+  shared check: non-empty, square, numeric, finite, symmetric and positive
+  semi-definite, each with a clear error message (previously some invalid
+  inputs failed with internal errors such as "infinite or missing values in 'x'").
+* Location and shape vectors (`mean`, `meanlog`, `xi`, skew-normal `alpha`,
+  mixture means) must be finite; `Inf`/`NA` used to propagate silently into
+  the output.
+* `r_mvskewnorm()` requires a strictly positive diagonal of `omega`, as its
+  parameterisation standardises by `sqrt(diag(omega))`.
+* `r_dirichlet()` now draws the gamma variates on the log scale (with the
+  `Y * U^(1/a)` boost for shapes below 1) and normalises with log-sum-exp, so
+  very small concentration parameters no longer give `NaN` rows. Draws for
+  `alpha < 1` therefore differ from 0.2.2 for the same seed.
+* `make_corr(d = 1)` returns the 1 x 1 identity without consulting `rho`.
+* t copula: when fewer than 10 complete rows are available, `df` is not
+  estimated but fixed at 10; this now triggers a warning, is recorded as
+  `df_estimated = FALSE` in the fitted copula and is shown by `summary()`.
+* `?fit_synthesizer` gains an "Estimation details" section documenting the
+  pairwise-complete estimation of latent correlations, the subsequent
+  projection to a valid correlation matrix, and the grid/profile-likelihood
+  estimate of the t-copula `df`.
+* New distributional tests: Dirichlet means, variances and covariances;
+  Kendall's tau of the Gaussian, t, Clayton, Gumbel and Frank copulas against
+  their closed forms for several parameters and all pairs; uniform margins of
+  every family; moments of the multivariate t, skew-normal, log-normal and
+  normal-mixture generators.
+
 # SynthesizerPlus 0.2.2
 
 Fixes from a second code review.
