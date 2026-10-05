@@ -6,10 +6,14 @@
 #' `fit_synthesizer()` learns a generative model from a data set. The model
 #' combines
 #'
-#' * a **marginal model per column**: an empirical quantile function for
-#'   continuous variables (linear or monotone-spline interpolation), and an
-#'   empirical probability table for discrete, categorical, ordinal and
-#'   logical variables;
+#' * a **marginal model per column**: an *interpolated* empirical quantile
+#'   function for continuous variables (linear or monotone-spline
+#'   interpolation between order statistics), and an empirical probability
+#'   table for discrete, categorical, ordinal and logical variables.
+#'   Interpolation means that synthetic values of a continuous variable lie
+#'   between, rather than on, the observed values, always within the
+#'   observed range. With small samples this slightly reduces the spread in
+#'   the tails compared with the data;
 #' * a **copula** (Gaussian, Student-*t* or independence) that couples the
 #'   columns. Mixed continuous / discrete data are handled with the
 #'   distributional transform, so categorical variables take part in the
@@ -144,8 +148,8 @@ fit_synthesizer.data.frame <- function(data,
   strata <- NULL
   if (length(by)) {
     key <- .stratum_key(data[by])
-    tab <- table(key, useNA = "no")
-    keys <- names(tab)
+    keys <- unique(key)                      # strata in order of first appearance
+    counts <- tabulate(match(key, keys), nbins = length(keys))
     first <- match(keys, key)
     values <- data[first, by, drop = FALSE]
     attr(values, "row.names") <- .set_row_names(length(keys))
@@ -156,8 +160,8 @@ fit_synthesizer.data.frame <- function(data,
     })
     names(models) <- keys
     strata <- list(keys = keys, values = values,
-                   probs = as.numeric(tab) / sum(tab),
-                   counts = as.integer(tab), models = models)
+                   probs = counts / sum(counts),
+                   counts = as.integer(counts), models = models)
   }
 
   structure(list(
@@ -209,9 +213,33 @@ fit_synthesizer.default <- function(data, ...) {
   invisible(NULL)
 }
 
-.stratum_key <- function(df) {
-  parts <- lapply(df, function(v) ifelse(is.na(v), "<NA>", as.character(v)))
-  do.call(paste, c(parts, sep = "\r"))
+# Collision-free row keys. Each column is coded by matching its values
+# against the union of values in all data frames given (NA gets its own code,
+# distinct from any string such as "<NA>"); keys combine the integer codes,
+# so no user value can create a collision. Returns one key vector per data
+# frame, with codes consistent across them.
+.row_keys <- function(...) {
+  dfs <- list(...)
+  n <- vapply(dfs, nrow, integer(1))
+  cols <- names(dfs[[1L]])
+  codes <- lapply(cols, function(nm) {
+    vals <- lapply(dfs, function(d) {
+      v <- d[[nm]]
+      if (is.factor(v)) as.character(v) else v
+    })
+    all <- do.call(c, unname(lapply(vals, function(v) if (inherits(v, c("Date", "POSIXct"))) as.numeric(v) else v)))
+    match(all, unique(all))
+  })
+  key <- if (length(codes)) do.call(paste, c(codes, sep = ".")) else rep("", sum(n))
+  split(key, rep(seq_along(dfs), n))
+}
+
+.stratum_key <- function(df) .row_keys(df)[[1L]]
+
+# Human-readable labels for strata, built from the stratum values
+.stratum_labels <- function(values) {
+  parts <- lapply(values, function(v) ifelse(is.na(v), "NA", as.character(v)))
+  do.call(paste, c(parts, sep = " / "))
 }
 
 # Fit marginals + copula on one block of data
@@ -510,7 +538,7 @@ copula_correlation <- function(object, stratum = NULL, include_missing = FALSE) 
   mod <- object$pooled
   if (!is.null(stratum)) {
     if (is.null(object$strata)) stop("The model is not stratified.", call. = FALSE)
-    i <- match(stratum, .stratum_label(object$strata$keys))
+    i <- match(stratum, .stratum_labels(object$strata$values))
     if (is.na(i)) stop("Unknown stratum: ", stratum, call. = FALSE)
     mod <- object$strata$models[[i]] %||% object$pooled
   }
@@ -522,7 +550,6 @@ copula_correlation <- function(object, stratum = NULL, include_missing = FALSE) 
   R
 }
 
-.stratum_label <- function(keys) gsub("\r", " / ", keys, fixed = TRUE)
 
 #' @rdname copula_correlation
 #' @export
@@ -545,7 +572,7 @@ summary.sp_synthesizer <- function(object, ...) {
   strata <- NULL
   if (!is.null(object$strata)) {
     st <- object$strata
-    strata <- data.frame(stratum = .stratum_label(st$keys), n = st$counts,
+    strata <- data.frame(stratum = .stratum_labels(st$values), n = st$counts,
                          model = ifelse(vapply(st$models, is.null, logical(1)),
                                         "pooled", "own"),
                          stringsAsFactors = FALSE)

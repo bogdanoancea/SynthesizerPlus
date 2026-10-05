@@ -1,13 +1,14 @@
 Package: SynthesizerPlus
 Type: Package
 Title: Synthetic Data Generation with Copulas, Evaluation and Multi-Format I/O
-Version: 0.2.0
+Version: 0.2.1
 Authors@R:
     person("Bogdan", "Oancea", email = "bogdan.oancea@gmail.com",
            role = c("aut", "cre", "cph"))
 Description: Generates synthetic versions of numeric, categorical, mixed-type
-    and time-series data. Marginal distributions are modelled with empirical
-    quantile functions and dependence with Gaussian or Student-t copulas
+    and time-series data. Marginal distributions are modelled with
+    interpolated empirical quantile functions and dependence with Gaussian or
+    Student-t copulas
     (Sklar, 1959), using the distributional transform (Ruschendorf, 2009,
     <doi:10.1016/j.jspi.2009.05.030>) so that categorical variables and
     missing-value patterns take part in the dependence structure. Supports

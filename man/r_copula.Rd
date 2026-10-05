@@ -22,9 +22,11 @@ r_copula(
 \item{dim}{Dimension (ignored when \code{corr} is given).}
 
 \item{corr}{Correlation matrix for elliptical copulas (default:
-exchangeable with \code{rho = 0.5}).}
+exchangeable with \code{rho = 0.5}). It must have a unit diagonal; a
+covariance matrix is rejected (convert it with \code{\link[stats:cor]{stats::cov2cor()}}).}
 
-\item{df}{Degrees of freedom for the \emph{t} copula.}
+\item{df}{Degrees of freedom for the \emph{t} copula: a positive number;
+\code{Inf} gives the Gaussian copula.}
 
 \item{theta}{Archimedean parameter: Clayton \code{theta > 0}, Gumbel
 \code{theta >= 1}, Frank \code{theta != 0} (\verb{> 0} when \code{dim > 2}).}

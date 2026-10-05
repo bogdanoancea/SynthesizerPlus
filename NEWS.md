@@ -1,3 +1,38 @@
+# SynthesizerPlus 0.2.1
+
+Fixes from an external code review.
+
+* `r_copula()` and `r_mvdist()` now require `corr` to be a correlation
+  matrix (square, symmetric, unit diagonal, entries in [-1, 1], positive
+  semi-definite). Previously a covariance matrix was accepted and produced
+  margins that were not uniform. The *t* copula and `r_mvt()` validate
+  `df` (positive; `Inf` gives the Gaussian copula); Archimedean `theta`
+  must be finite.
+* Row keys used for strata, `disclosure_risk()` and exact-copy detection
+  are now built from integer codes: a missing value can no longer collide
+  with the string `"<NA>"`, and values containing the old separator can no
+  longer make different rows look identical. Strata are listed in order of
+  first appearance.
+* `dcr()` gains `na = c("category", "exclude")`. The default treats
+  missingness as a category (as before, now documented); `"exclude"` gives
+  the standard Gower coefficient, ignoring variables missing in either
+  record.
+* `discriminator_auc()` learns all preprocessing (imputation, scaling,
+  retained categories) within the training folds, so the cross-validated
+  AUC has no leakage from the held-out fold. Its documentation explains
+  that values clearly below 0.5 indicate copies of real records.
+* `r_mvmixture()` rejects all-zero or non-finite weights and components of
+  inconsistent dimension with clear messages; `margin_categorical()` rejects
+  duplicated levels and non-finite probabilities; the quantile functions it
+  and `margin_empirical()` return check that probabilities lie in [0, 1].
+* `match_types()` reads date-time strings without zone information as
+  local times in the template's time zone (strings ending in `Z` are UTC,
+  explicit offsets such as `+02:00` are honoured), and accepts mixed
+  formats within a column.
+* Documentation: continuous marginals are described as *interpolated*
+  empirical quantile functions; the `noise` perturbation preserves mean and
+  variance approximately rather than exactly.
+
 # SynthesizerPlus 0.2.0
 
 Complete rewrite. the API changed and is not backward compatible with 0.1.0.

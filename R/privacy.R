@@ -84,8 +84,9 @@ disclosure_risk <- function(real, synthetic, keys, target = NULL, ignore = NULL,
     stop("'tolerance' must be a non-negative number.", call. = FALSE)
   }
 
-  kr <- .stratum_key(real[keys])
-  ks <- .stratum_key(synthetic[keys])
+  kk <- .row_keys(real[keys], synthetic[keys])
+  kr <- kk[[1L]]
+  ks <- kk[[2L]]
   freq_r <- table(kr)
   freq_s <- table(ks)
   uniq_r <- names(freq_r)[freq_r == 1L]
@@ -95,8 +96,9 @@ disclosure_risk <- function(real, synthetic, keys, target = NULL, ignore = NULL,
     0
   }
 
-  full_r <- .stratum_key(real)
-  full_s <- .stratum_key(synthetic)
+  full <- .row_keys(real, synthetic)
+  full_r <- full[[1L]]
+  full_s <- full[[2L]]
   exact <- mean(full_s %in% full_r)
 
   attr_tab <- NULL

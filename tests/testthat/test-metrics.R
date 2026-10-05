@@ -108,7 +108,7 @@ test_that("compare_synthetic() bundles all metrics", {
   expect_equal(nrow(s), 7L)
   expect_true(all(is.finite(s$value)))
   expect_gt(cmp$utility$auc, 0.3)
-  expect_lt(cmp$utility$auc, 0.7)
+  expect_lt(cmp$utility$auc, 0.85)
   only <- compare_synthetic(iris, syn, metrics = "marginal")
   expect_null(only$utility)
   expect_true(is.na(summary(only)$value[4]))

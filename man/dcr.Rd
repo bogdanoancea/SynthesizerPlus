@@ -10,7 +10,8 @@ dcr(
   vars = NULL,
   max_rows = 2000L,
   seed = NULL,
-  close_quantile = 0.05
+  close_quantile = 0.05,
+  na = c("category", "exclude")
 )
 }
 \arguments{
@@ -24,6 +25,9 @@ dcr(
 
 \item{close_quantile}{Quantile of the real-to-real distances that defines
 a synthetic record as "too close" to a real record (see \code{close_share}).}
+
+\item{na}{Treatment of missing values: \code{"category"} (default) or
+\code{"exclude"} (standard Gower); see Details.}
 }
 \value{
 A list with the distance vectors \code{synthetic} and \code{real},
@@ -46,7 +50,33 @@ Synthetic records that are much closer to real records than real records
 are to each other, and in particular exact copies (distance 0), indicate
 a disclosure risk.
 }
+\details{
+Numeric variables contribute their absolute difference divided by the
+range in the real data, categorical variables 0 (equal) or 1 (different).
+Missing values are handled according to \code{na}:
+\itemize{
+\item \code{"category"} (default): missingness is treated as a category of its own
+-- two missing values match, a missing and an observed value differ --
+and the distance is averaged over all variables. Because the
+synthesizer reproduces missingness patterns, and an intruder sees them,
+this is the appropriate view for disclosure risk.
+\item \code{"exclude"}: the standard Gower (1971) coefficient; a variable missing in
+either record is left out of the comparison and the distance is averaged
+over the variables observed in both. Records with no variable in common
+have no distance (\code{NA}) and are ignored.
+}
+}
 \examples{
 syn <- synthesize(iris, seed = 1)
 str(dcr(iris, syn, seed = 1)[c("exact_match_rate", "ratio")])
+
+# data with missing values: missingness as a category, or standard Gower
+aq <- synthesize(airquality, seed = 1)
+dcr(airquality, aq, seed = 1)$ratio
+dcr(airquality, aq, seed = 1, na = "exclude")$ratio
+}
+\references{
+Gower, J. C. (1971). A general coefficient of similarity and
+some of its properties. \emph{Biometrics}, 27(4), 857--871.
+\doi{10.2307/2528823}
 }

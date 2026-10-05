@@ -129,11 +129,12 @@ noise levels the risk (`close_share`) and the utility of a typical analysis
 — a regression of income on demographic variables, compared with the same
 regression on the real data through the overlap of the confidence intervals
 (mean overlap, negative values counted as 0; 1 = identical inference).
-Results are averaged over two synthetic files per setting.
+Results are averaged over four synthetic files per setting; the utility
+estimates still vary by about ±0.03 from one set of files to another.
 
 ```{r}
 model <- income ~ age + sex + education + employment
-risk_utility <- function(fit, closeness, seeds = 1:2) {
+risk_utility <- function(fit, closeness, seeds = 1:4) {
   v <- sapply(seeds, function(sd) {
     s <- generate(fit, closeness = closeness, seed = sd)
     c(dcr(conf, s[-1], max_rows = 1500, seed = 1)$close_share,
@@ -172,9 +173,10 @@ decision: right is safer, up is more useful. It shows two things.
   level increases, the share of near-copies falls towards the chance level
   (dashed line) — and the utility falls with it.
 * The **well-specified model is the better starting point**: without any
-  noise it is already at the chance level of near-copies, and it is far
-  more useful than the noisy versions of the detailed model that reach the
-  same level of risk. Pushing the detailed model slightly *below* the
+  noise it is already at the chance level of near-copies, with about the
+  same utility as the detailed model without noise, and clearly more
+  utility than the noisy versions of the detailed model that reach the same
+  level of risk. Pushing the detailed model slightly *below* the
   chance level is possible, but costs most of its utility. The first lever
   for privacy is therefore the model (not too many small strata, `knots`, a
   sensible `discrete_threshold`); noise is the second lever, to be used in

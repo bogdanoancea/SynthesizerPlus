@@ -47,9 +47,11 @@ records while (approximately) keeping the distributions:
 \item \code{noise} -- smoothing of numeric variables. Each value is replaced by
 \eqn{\mu + (x - \mu + h s \varepsilon) / \sqrt{1 + h^2}} with
 \eqn{\varepsilon \sim N(0, 1)}, where \eqn{h} is \code{noise} and \eqn{\mu},
-\eqn{s} are the mean and standard deviation of the variable. Mean and
-variance are preserved; the distribution becomes smoother and values no
-longer coincide with observed ones.
+\eqn{s} are the mean and standard deviation of the variable in the
+fitted model. Mean and variance are approximately preserved (exactly
+only if \eqn{\mu} and \eqn{s} matched the generated values exactly;
+rounding of whole-number variables adds a little variance); the
+distribution becomes smoother and values move away from observed ones.
 \item \code{swap} -- probability that a value of a categorical or discrete variable
 is replaced by an independent draw from its marginal distribution. The
 marginal distribution is preserved; the association with other variables

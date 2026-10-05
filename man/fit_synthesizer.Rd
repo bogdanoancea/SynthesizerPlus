@@ -78,10 +78,14 @@ An object of class \code{sp_synthesizer}.
 \code{fit_synthesizer()} learns a generative model from a data set. The model
 combines
 \itemize{
-\item a \strong{marginal model per column}: an empirical quantile function for
-continuous variables (linear or monotone-spline interpolation), and an
-empirical probability table for discrete, categorical, ordinal and
-logical variables;
+\item a \strong{marginal model per column}: an \emph{interpolated} empirical quantile
+function for continuous variables (linear or monotone-spline
+interpolation between order statistics), and an empirical probability
+table for discrete, categorical, ordinal and logical variables.
+Interpolation means that synthetic values of a continuous variable lie
+between, rather than on, the observed values, always within the
+observed range. With small samples this slightly reduces the spread in
+the tails compared with the data;
 \item a \strong{copula} (Gaussian, Student-\emph{t} or independence) that couples the
 columns. Mixed continuous / discrete data are handled with the
 distributional transform, so categorical variables take part in the

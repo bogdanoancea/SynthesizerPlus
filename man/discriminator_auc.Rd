@@ -33,11 +33,19 @@ The cross-validated AUC (a number).
 \description{
 Cross-validated area under the ROC curve of a logistic-regression
 classifier trained to tell real from synthetic records. Out-of-fold
-predictions are used, so the AUC is not optimistically biased. Values
+predictions are used, and all preprocessing (imputation, scaling, choice
+of categories) is learned within the training folds, so the AUC is not
+optimistically biased. Values
 near 0.5 mean the classifier cannot distinguish the data sets; values
 near 1 mean the synthetic data are easy to spot.
 }
 \details{
+Values clearly \emph{below} 0.5 are a warning sign of a different kind: they
+arise when synthetic records are copies of real ones. A held-out record
+then has an identical twin with the opposite label in the training folds,
+and the classifier systematically predicts the wrong class. Check such
+cases with \code{\link[=dcr]{dcr()}}.
+
 The default \code{model = "quadratic"} adds squares and pairwise products of
 the numeric variables (ridge-penalised), so that differences in spread and
 in correlation are detected, not only differences in location.

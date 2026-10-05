@@ -76,8 +76,8 @@ Internally, `closeness` \(c\) is translated into a perturbation with
 
 ## Record level: further from real records, same distributions
 
-`noise` replaces each continuous value by a smoothed version that keeps the
-mean and variance of the variable; `swap` re-draws categorical and discrete
+`noise` replaces each numeric value by a smoothed version that approximately
+keeps the mean and variance of the variable; `swap` re-draws categorical and discrete
 values from their marginal distribution. The distributions stay (nearly)
 the same, but individual synthetic records move away from the real ones.
 

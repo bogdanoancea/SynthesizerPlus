@@ -562,6 +562,11 @@ write_data <- function(x, path, format = NULL, overwrite = TRUE,
 #' are parsed, and integers/logicals are restored. Columns not present in
 #' the template are left unchanged.
 #'
+#' Date-time strings ending in `Z` are read as UTC, strings with an explicit
+#' offset (e.g. `+02:00`) are converted from that offset, and strings without
+#' zone information are read as local times in the time zone of the template
+#' column.
+#'
 #' @param x A data frame.
 #' @param template A data frame with the desired column classes.
 #' @return `x` with coerced columns.
@@ -629,12 +634,37 @@ match_types <- function(x, template) {
   factor(vc, levels = lev, ordered = ordered)
 }
 
+# Parse date-time strings. Strings ending in "Z" are UTC and strings with an
+# explicit offset ("+02:00", "-0500") are converted from that offset; strings
+# without zone information are local times in the template's time zone.
 .parse_datetime <- function(v, tz) {
-  v <- sub("Z$", "", sub("T", " ", v, fixed = TRUE))
-  out <- as.POSIXct(v, tz = "UTC", tryFormats = c("%Y-%m-%d %H:%M:%OS", "%Y-%m-%d %H:%M",
-                                                   "%Y-%m-%d", "%Y/%m/%d %H:%M:%OS"),
-                    optional = TRUE)
-  attr(out, "tzone") <- tz
+  v <- trimws(sub("T", " ", as.character(v), fixed = TRUE))
+  out <- rep(NA_real_, length(v))
+  utc <- grepl("Z$", v)
+  off_re <- "([+-])([0-9]{2}):?([0-9]{2})$"
+  has_off <- !utc & grepl(paste0("[0-9]", off_re), v)
+  local <- !utc & !has_off
+  if (any(utc)) out[utc] <- .parse_dt_formats(sub("Z$", "", v[utc]), "UTC")
+  if (any(has_off)) {
+    m <- regmatches(v[has_off], regexec(off_re, v[has_off]))
+    secs <- vapply(m, function(z) {
+      (if (z[2L] == "-") -1 else 1) * (as.numeric(z[3L]) * 3600 + as.numeric(z[4L]) * 60)
+    }, numeric(1))
+    out[has_off] <- .parse_dt_formats(sub(off_re, "", v[has_off]), "UTC") - secs
+  }
+  if (any(local)) out[local] <- .parse_dt_formats(v[local], tz)
+  structure(out, class = c("POSIXct", "POSIXt"), tzone = tz)
+}
+
+.parse_dt_formats <- function(x, tz) {
+  formats <- c("%Y-%m-%d %H:%M:%OS", "%Y-%m-%d %H:%M", "%Y-%m-%d",
+               "%Y/%m/%d %H:%M:%OS", "%Y/%m/%d %H:%M", "%Y/%m/%d")
+  out <- rep(NA_real_, length(x))
+  for (f in formats) {
+    todo <- is.na(out) & !is.na(x) & nzchar(x)
+    if (!any(todo)) break
+    out[todo] <- as.numeric(as.POSIXct(x[todo], tz = tz, format = f))
+  }
   out
 }
 

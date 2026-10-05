@@ -1,7 +1,8 @@
 # Marginal models --------------------------------------------------------------
 #
 # Each column of the training data is described by an `sp_marginal` object:
-#   type = "continuous"  empirical quantile function (linear / monotone spline)
+#   type = "continuous"  interpolated empirical quantile function (linear /
+#                        monotone spline between order statistics)
 #          "discrete"    finite numeric support with probabilities
 #          "categorical" finite set of labels with probabilities
 #          "empty"       column is entirely missing

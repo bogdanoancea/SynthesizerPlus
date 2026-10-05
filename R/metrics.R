@@ -183,42 +183,74 @@ association_matrix <- function(data, vars = NULL) {
 
 # Feature preparation for classifiers ---------------------------------------
 
-.prep_features <- function(df, max_levels = 20L) {
-  cols <- list()
-  numeric_cols <- character(0)
+# Feature preparation for the classifiers, in two steps so that it can be
+# learned on training data only (no leakage into cross-validation folds):
+# .prep_fit() learns medians, means, standard deviations and the retained
+# categories; .prep_apply() turns any data frame into the design matrix.
+.prep_fit <- function(df, max_levels = 20L) {
+  spec <- list()
   for (nm in names(df)) {
     v <- df[[nm]]
     if (.is_numeric_like(v)) {
       v <- as.numeric(v)
       miss <- is.na(v)
       if (all(miss)) next
-      if (any(miss)) {
-        v[miss] <- stats::median(v, na.rm = TRUE)
-        cols[[paste0(nm, "..NA")]] <- as.numeric(miss)
+      med <- stats::median(v, na.rm = TRUE)
+      v[miss] <- med
+      s <- stats::sd(v)
+      spec[[nm]] <- list(type = "numeric", median = med, na_indicator = any(miss),
+                         mean = mean(v), sd = if (is.finite(s)) s else 0)
+    } else {
+      v <- as.character(v)
+      v[is.na(v)] <- "(missing)"
+      tab <- sort(table(v), decreasing = TRUE)
+      lumped <- length(tab) > max_levels
+      if (lumped) {
+        keep <- names(tab)[seq_len(max_levels - 1L)]
+        v[!v %in% keep] <- "(other)"
+        tab <- sort(table(v), decreasing = TRUE)
       }
-      if (stats::sd(v) > 0) {
-        cols[[nm]] <- (v - mean(v)) / stats::sd(v)
+      if (length(tab) < 2L) next
+      spec[[nm]] <- list(type = "categorical", levels = names(tab), lumped = lumped)
+    }
+  }
+  spec
+}
+
+.prep_apply <- function(spec, df) {
+  cols <- list()
+  numeric_cols <- character(0)
+  for (nm in names(spec)) {
+    sp <- spec[[nm]]
+    v <- df[[nm]]
+    if (sp$type == "numeric") {
+      v <- as.numeric(v)
+      miss <- is.na(v)
+      v[miss] <- sp$median
+      if (sp$na_indicator) cols[[paste0(nm, "..NA")]] <- as.numeric(miss)
+      if (sp$sd > 0) {
+        cols[[nm]] <- (v - sp$mean) / sp$sd
         numeric_cols <- c(numeric_cols, nm)
       }
     } else {
       v <- as.character(v)
       v[is.na(v)] <- "(missing)"
-      tab <- sort(table(v), decreasing = TRUE)
-      if (length(tab) > max_levels) {
-        keep <- names(tab)[seq_len(max_levels - 1L)]
-        v[!v %in% keep] <- "(other)"
-      }
-      lev <- unique(v)
-      if (length(lev) < 2L) next
-      lev <- names(sort(table(v), decreasing = TRUE))
-      for (l in lev[-1L]) cols[[paste0(nm, "==", l)]] <- as.numeric(v == l)
+      if (sp$lumped) v[!v %in% sp$levels] <- "(other)"
+      for (l in sp$levels[-1L]) cols[[paste0(nm, "==", l)]] <- as.numeric(v == l)
     }
   }
-  if (!length(cols)) return(matrix(numeric(0), nrow(df), 0L))
-  X <- do.call(cbind, cols)
-  colnames(X) <- names(cols)
+  if (!length(cols)) {
+    X <- matrix(numeric(0), NROW(df), 0L)
+  } else {
+    X <- do.call(cbind, cols)
+    colnames(X) <- names(cols)
+  }
   attr(X, "numeric_cols") <- numeric_cols
   X
+}
+
+.prep_features <- function(df, max_levels = 20L) {
+  .prep_apply(.prep_fit(df, max_levels), df)
 }
 
 # Add squares and pairwise products of the numeric features (detects
@@ -286,6 +318,13 @@ association_matrix <- function(data, vars = NULL) {
   list(X = X, y = c(rep(0, nrow(r)), rep(1, nrow(s))))
 }
 
+# Stacked raw data (no preprocessing), for cross-validation
+.stack_raw <- function(real, synthetic, vars, max_rows) {
+  r <- .subsample(real[vars], max_rows)
+  s <- .subsample(synthetic[vars], max_rows)
+  list(data = rbind(r, s), y = c(rep(0, nrow(r)), rep(1, nrow(s))))
+}
+
 #' Propensity-score utility (pMSE)
 #'
 #' The real and synthetic records are stacked and a logistic regression
@@ -339,9 +378,17 @@ pmse <- function(real, synthetic, vars = NULL, max_rows = 10000L, seed = NULL,
 #'
 #' Cross-validated area under the ROC curve of a logistic-regression
 #' classifier trained to tell real from synthetic records. Out-of-fold
-#' predictions are used, so the AUC is not optimistically biased. Values
+#' predictions are used, and all preprocessing (imputation, scaling, choice
+#' of categories) is learned within the training folds, so the AUC is not
+#' optimistically biased. Values
 #' near 0.5 mean the classifier cannot distinguish the data sets; values
 #' near 1 mean the synthetic data are easy to spot.
+#'
+#' Values clearly *below* 0.5 are a warning sign of a different kind: they
+#' arise when synthetic records are copies of real ones. A held-out record
+#' then has an identical twin with the opposite label in the training folds,
+#' and the classifier systematically predicts the wrong class. Check such
+#' cases with [dcr()].
 #'
 #' The default `model = "quadratic"` adds squares and pairwise products of
 #' the numeric variables (ridge-penalised), so that differences in spread and
@@ -365,16 +412,24 @@ discriminator_auc <- function(real, synthetic, vars = NULL, folds = 5L,
   folds <- .check_count(folds, "folds", allow_zero = FALSE)
   if (folds < 2L) stop("'folds' must be at least 2.", call. = FALSE)
   .with_seed(seed, {
-    st <- .stack(p$real, p$synthetic, vars, max_rows, model)
+    st <- .stack_raw(p$real, p$synthetic, vars, max_rows)
     N <- length(st$y)
     ridge <- if (model == "quadratic") 1 else 0
     fold <- sample(rep_len(seq_len(folds), N))
     score <- numeric(N)
-    Xi <- cbind(1, st$X)
+    design <- function(spec, d) {
+      X <- .prep_apply(spec, d)
+      if (model == "quadratic") X <- .add_quadratic(X)
+      X
+    }
     for (k in seq_len(folds)) {
       te <- fold == k
-      fit <- .fit_logit(st$X[!te, , drop = FALSE], st$y[!te], ridge = ridge)
-      score[te] <- drop(Xi[te, , drop = FALSE] %*% fit$coef)
+      # preprocessing is learned on the training folds only
+      spec <- .prep_fit(st$data[!te, , drop = FALSE])
+      Xtr <- design(spec, st$data[!te, , drop = FALSE])
+      Xte <- design(spec, st$data[te, , drop = FALSE])
+      fit <- .fit_logit(Xtr, st$y[!te], ridge = ridge)
+      score[te] <- drop(cbind(1, Xte) %*% fit$coef)
     }
     .auc(st$y, score)
   })
@@ -441,7 +496,8 @@ ci_overlap <- function(real, synthetic, formula, family = stats::gaussian(),
     v <- df[[nm]]
     r <- ref[[nm]]
     if (.is_numeric_like(r)) {
-      rng <- diff(range(as.numeric(r), na.rm = TRUE))
+      rv <- as.numeric(r)
+      rng <- if (any(!is.na(rv))) diff(range(rv, na.rm = TRUE)) else NA_real_
       if (!is.finite(rng) || rng == 0) rng <- 1
       list(num = TRUE, x = as.numeric(v) / rng)
     } else {
@@ -450,8 +506,15 @@ ci_overlap <- function(real, synthetic, formula, family = stats::gaussian(),
   })
 }
 
-# minimum Gower distance from each row of A to rows of B
-.min_gower <- function(A, B, exclude_self = FALSE, block = 256L) {
+# Minimum Gower distance from each row of A to the rows of B.
+# na = "category": a missing value is treated as a category of its own
+#   (missing vs missing = 0, missing vs observed = 1); every variable counts.
+# na = "exclude": standard Gower (1971); a variable missing in either record
+#   is left out of that comparison, and the distance is averaged over the
+#   variables observed in both (NA if there are none).
+.min_gower <- function(A, B, exclude_self = FALSE, block = 256L,
+                       na = c("category", "exclude")) {
+  na <- match.arg(na)
   nA <- length(A[[1L]]$x)
   nB <- length(B[[1L]]$x)
   p <- length(A)
@@ -459,19 +522,31 @@ ci_overlap <- function(real, synthetic, formula, family = stats::gaussian(),
   for (s in seq(1L, nA, by = block)) {
     idx <- s:min(nA, s + block - 1L)
     D <- matrix(0, length(idx), nB)
+    W <- matrix(0, length(idx), nB)
     for (j in seq_len(p)) {
       a <- A[[j]]$x[idx]
       b <- B[[j]]$x
-      dj <- if (A[[j]]$num) abs(outer(a, b, "-")) else (outer(a, b, "!=") + 0)
-      na_mis <- outer(is.na(a), is.na(b), "!=")
-      both <- outer(is.na(a), is.na(b), "&")
-      dj[na_mis] <- 1
-      dj[both] <- 0
-      D <- D + pmin(dj, 1)
+      dj <- if (A[[j]]$num) pmin(abs(outer(a, b, "-")), 1) else (outer(a, b, "!=") + 0)
+      na_a <- is.na(a)
+      na_b <- is.na(b)
+      if (na == "category") {
+        dj[outer(na_a, na_b, "!=")] <- 1
+        dj[outer(na_a, na_b, "&")] <- 0
+        D <- D + dj
+        W <- W + 1
+      } else {
+        comparable <- outer(!na_a, !na_b, "&")
+        dj[!comparable] <- 0
+        D <- D + dj
+        W <- W + comparable
+      }
     }
-    D <- D / p
+    D <- D / W
+    D[W == 0] <- NA_real_
     if (exclude_self) D[cbind(seq_along(idx), idx)] <- Inf
-    out[idx] <- apply(D, 1L, min)
+    out[idx] <- apply(D, 1L, function(r) {
+      if (all(is.na(r))) NA_real_ else min(r, na.rm = TRUE)
+    })
   }
   out
 }
@@ -485,10 +560,26 @@ ci_overlap <- function(real, synthetic, formula, family = stats::gaussian(),
 #' are to each other, and in particular exact copies (distance 0), indicate
 #' a disclosure risk.
 #'
+#' Numeric variables contribute their absolute difference divided by the
+#' range in the real data, categorical variables 0 (equal) or 1 (different).
+#' Missing values are handled according to `na`:
+#'
+#' * `"category"` (default): missingness is treated as a category of its own
+#'   -- two missing values match, a missing and an observed value differ --
+#'   and the distance is averaged over all variables. Because the
+#'   synthesizer reproduces missingness patterns, and an intruder sees them,
+#'   this is the appropriate view for disclosure risk.
+#' * `"exclude"`: the standard Gower (1971) coefficient; a variable missing in
+#'   either record is left out of the comparison and the distance is averaged
+#'   over the variables observed in both. Records with no variable in common
+#'   have no distance (`NA`) and are ignored.
+#'
 #' @inheritParams pmse
 #' @param max_rows Maximum number of records used from each data set.
 #' @param close_quantile Quantile of the real-to-real distances that defines
 #'   a synthetic record as "too close" to a real record (see `close_share`).
+#' @param na Treatment of missing values: `"category"` (default) or
+#'   `"exclude"` (standard Gower); see Details.
 #' @return A list with the distance vectors `synthetic` and `real`,
 #'   their `quantiles`, the share of synthetic records that are exact copies
 #'   of a real record (`exact_match_rate`), the same share within the real
@@ -500,13 +591,22 @@ ci_overlap <- function(real, synthetic, formula, family = stats::gaussian(),
 #'   far from real ones as real records are from each other, `close_share`
 #'   is about `close_quantile`; larger values indicate records that may be
 #'   recognised as near-copies of real persons.
+#' @references Gower, J. C. (1971). A general coefficient of similarity and
+#'   some of its properties. *Biometrics*, 27(4), 857--871.
+#'   \doi{10.2307/2528823}
 #' @examples
 #' syn <- synthesize(iris, seed = 1)
 #' str(dcr(iris, syn, seed = 1)[c("exact_match_rate", "ratio")])
+#'
+#' # data with missing values: missingness as a category, or standard Gower
+#' aq <- synthesize(airquality, seed = 1)
+#' dcr(airquality, aq, seed = 1)$ratio
+#' dcr(airquality, aq, seed = 1, na = "exclude")$ratio
 #' @export
 dcr <- function(real, synthetic, vars = NULL, max_rows = 2000L, seed = NULL,
-                close_quantile = 0.05) {
+                close_quantile = 0.05, na = c("category", "exclude")) {
   close_quantile <- .check_prob(close_quantile, "close_quantile")
+  na <- match.arg(na)
   p <- .check_pair(real, synthetic)
   vars <- .select_vars(p$real, vars)
   .with_seed(seed, {
@@ -514,8 +614,13 @@ dcr <- function(real, synthetic, vars = NULL, max_rows = 2000L, seed = NULL,
     s <- .subsample(p$synthetic[vars], max_rows)
     R <- .gower_prep(r, p$real)
     S <- .gower_prep(s, p$real)
-    d_syn <- .min_gower(S, R)
-    d_real <- .min_gower(R, R, exclude_self = TRUE)
+    d_syn <- .min_gower(S, R, na = na)
+    d_real <- .min_gower(R, R, exclude_self = TRUE, na = na)
+    d_syn <- d_syn[!is.na(d_syn)]
+    d_real <- d_real[!is.na(d_real)]
+    if (!length(d_syn) || !length(d_real)) {
+      stop("No pair of records has a variable observed in both.", call. = FALSE)
+    }
     probs <- c(0.01, 0.05, 0.25, 0.5)
     q <- rbind(synthetic = stats::quantile(d_syn, probs, names = FALSE),
                real = stats::quantile(d_real, probs, names = FALSE))

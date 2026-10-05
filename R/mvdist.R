@@ -62,6 +62,32 @@ make_corr <- function(d, type = c("exchangeable", "ar1", "toeplitz", "random", "
   t(e$vectors %*% diag(sqrt(pmax(e$values, 0)), length(e$values)))
 }
 
+# A correlation matrix: square, finite, symmetric, unit diagonal, entries in
+# [-1, 1] and positive semi-definite
+.validate_corr <- function(R, arg = "corr", tol = 1e-8) {
+  R <- as.matrix(R)
+  if (!is.numeric(R) || nrow(R) != ncol(R) || nrow(R) < 1L) {
+    stop(sprintf("'%s' must be a square numeric matrix.", arg), call. = FALSE)
+  }
+  if (any(!is.finite(R))) stop(sprintf("'%s' must contain finite values.", arg), call. = FALSE)
+  if (!isSymmetric(unname(R), tol = tol)) stop(sprintf("'%s' must be symmetric.", arg), call. = FALSE)
+  if (any(abs(diag(R) - 1) > tol)) {
+    stop(sprintf("'%s' must be a correlation matrix with unit diagonal; use stats::cov2cor() to convert a covariance matrix.",
+                 arg), call. = FALSE)
+  }
+  if (any(abs(R) > 1 + tol)) stop(sprintf("Entries of '%s' must lie in [-1, 1].", arg), call. = FALSE)
+  .mat_sqrt(R)   # fails if not positive semi-definite
+  R
+}
+
+# Degrees of freedom: positive number; Inf gives the Gaussian case
+.check_df <- function(df) {
+  if (!is.numeric(df) || length(df) != 1L || is.na(df) || df <= 0) {
+    stop("'df' must be a single positive number (Inf gives the Gaussian case).", call. = FALSE)
+  }
+  df
+}
+
 .mv_names <- function(M, d, prefix = "X") {
   nm <- colnames(M)
   if (is.null(nm)) nm <- paste0(prefix, seq_len(d))
@@ -135,7 +161,7 @@ r_mvnorm <- function(n, mean = NULL, sigma, seed = NULL) {
 #' @rdname mvdist
 #' @export
 r_mvt <- function(n, df, mean = NULL, sigma, seed = NULL) {
-  if (!is.numeric(df) || length(df) != 1L || df <= 0) stop("'df' must be positive.", call. = FALSE)
+  .check_df(df)
   .with_seed(seed, {
     z <- r_mvnorm(n, mean = NULL, sigma = sigma)
     if (is.finite(df)) z <- z / sqrt(stats::rchisq(nrow(z), df) / df)
@@ -196,11 +222,23 @@ r_mvmixture <- function(n, weights, means, sigmas, return_component = FALSE,
                         seed = NULL) {
   n <- .check_count(n)
   k <- length(weights)
-  if (k < 1L || length(means) != k || length(sigmas) != k || any(weights < 0)) {
-    stop("'weights', 'means' and 'sigmas' must have the same length and weights must be non-negative.",
-         call. = FALSE)
+  if (!is.list(means) || !is.list(sigmas)) {
+    stop("'means' and 'sigmas' must be lists (one element per component).", call. = FALSE)
+  }
+  if (k < 1L || length(means) != k || length(sigmas) != k) {
+    stop("'weights', 'means' and 'sigmas' must have the same length.", call. = FALSE)
+  }
+  if (!is.numeric(weights) || any(!is.finite(weights)) || any(weights < 0) || sum(weights) <= 0) {
+    stop("'weights' must be finite, non-negative and not all zero.", call. = FALSE)
   }
   d <- length(means[[1L]])
+  for (j in seq_len(k)) {
+    sj <- as.matrix(sigmas[[j]])
+    if (length(means[[j]]) != d || !identical(dim(sj), c(d, d))) {
+      stop(sprintf("Component %d: all means must have length %d and all sigmas must be %d x %d.",
+                   j, d, d, d), call. = FALSE)
+    }
+  }
   .with_seed(seed, {
     comp <- sample.int(k, n, replace = TRUE, prob = weights / sum(weights))
     out <- matrix(NA_real_, n, d)
@@ -227,8 +265,10 @@ r_mvmixture <- function(n, weights, means, sigmas, return_component = FALSE,
 #' @param family Copula family.
 #' @param dim Dimension (ignored when `corr` is given).
 #' @param corr Correlation matrix for elliptical copulas (default:
-#'   exchangeable with `rho = 0.5`).
-#' @param df Degrees of freedom for the *t* copula.
+#'   exchangeable with `rho = 0.5`). It must have a unit diagonal; a
+#'   covariance matrix is rejected (convert it with [stats::cov2cor()]).
+#' @param df Degrees of freedom for the *t* copula: a positive number;
+#'   `Inf` gives the Gaussian copula.
 #' @param theta Archimedean parameter: Clayton `theta > 0`, Gumbel
 #'   `theta >= 1`, Frank `theta != 0` (`> 0` when `dim > 2`).
 #' @param seed Optional random seed.
@@ -255,13 +295,14 @@ r_copula <- function(n, family = c("gaussian", "t", "clayton", "gumbel", "frank"
 
 .r_copula_impl <- function(n, family, d, corr, df, theta) {
   if (family %in% c("clayton", "gumbel", "frank") &&
-      (is.null(theta) || !is.numeric(theta) || length(theta) != 1L)) {
-    stop("'theta' must be a single number for Archimedean copulas.", call. = FALSE)
+      (is.null(theta) || !is.numeric(theta) || length(theta) != 1L || !is.finite(theta))) {
+    stop("'theta' must be a single finite number for Archimedean copulas.", call. = FALSE)
   }
   U <- switch(family,
     independence = matrix(stats::runif(n * d), n, d),
     gaussian = , t = {
-      R <- corr %||% make_corr(d, "exchangeable", 0.5)
+      R <- if (is.null(corr)) make_corr(d, "exchangeable", 0.5) else .validate_corr(corr)
+      if (family == "t") .check_df(df)
       cop <- list(family = family, R = R, chol = .mat_sqrt(R),
                   df = if (family == "t") df else Inf)
       .rcopula_fitted(n, cop)
@@ -411,12 +452,26 @@ r_mvdist <- function(n, margins, copula = "gaussian", ..., seed = NULL) {
 #' @export
 margin_categorical <- function(levels, probs = NULL, ordered = FALSE) {
   levels <- as.character(levels)
+  if (!length(levels) || anyNA(levels) || anyDuplicated(levels)) {
+    stop("'levels' must be non-missing and unique.", call. = FALSE)
+  }
   probs <- probs %||% rep(1, length(levels))
-  if (length(probs) != length(levels) || any(probs < 0) || sum(probs) <= 0) {
-    stop("'probs' must be non-negative and match 'levels' in length.", call. = FALSE)
+  if (!is.numeric(probs) || length(probs) != length(levels) || any(!is.finite(probs)) ||
+      any(probs < 0) || sum(probs) <= 0) {
+    stop("'probs' must be finite, non-negative and match 'levels' in length.", call. = FALSE)
   }
   m <- list(type = "categorical", values = levels, probs = probs / sum(probs))
-  function(p) factor(.marginal_quantile(m, p), levels = levels, ordered = ordered)
+  function(p) {
+    .check_unit_interval(p)
+    factor(.marginal_quantile(m, p), levels = levels, ordered = ordered)
+  }
+}
+
+.check_unit_interval <- function(p) {
+  if (!is.numeric(p) || anyNA(p) || any(p < 0 | p > 1)) {
+    stop("Probabilities must be numbers in [0, 1].", call. = FALSE)
+  }
+  invisible(p)
 }
 
 #' @rdname margin_categorical
@@ -426,5 +481,8 @@ margin_empirical <- function(x, interpolation = c("linear", "spline")) {
   m <- .fit_marginal(x, "x", interpolation = interpolation, discrete_threshold = 0L)
   if (m$type == "empty") stop("'x' has no observed values.", call. = FALSE)
   proto <- x[0L]
-  function(p) .restore_class(.marginal_quantile(m, p), m, proto)
+  function(p) {
+    .check_unit_interval(p)
+    .restore_class(.marginal_quantile(m, p), m, proto)
+  }
 }

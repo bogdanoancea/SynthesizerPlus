@@ -20,6 +20,12 @@ Excel): factors regain their levels (and ordering), dates and date-times
 are parsed, and integers/logicals are restored. Columns not present in
 the template are left unchanged.
 }
+\details{
+Date-time strings ending in \code{Z} are read as UTC, strings with an explicit
+offset (e.g. \code{+02:00}) are converted from that offset, and strings without
+zone information are read as local times in the time zone of the template
+column.
+}
 \examples{
 f <- tempfile(fileext = ".csv")
 write.csv(iris, f, row.names = FALSE)
