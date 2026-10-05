@@ -1,0 +1,266 @@
+---
+title: "Releasing confidential microdata as synthetic data"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+vignette: >
+  %\VignetteIndexEntry{Releasing confidential microdata as synthetic data}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7,
+                      fig.height = 4, dpi = 72, out.width = "100%")
+```
+
+Statistical offices and survey organisations hold microdata — census
+records, labour force or household budget surveys — that cannot be published
+because individuals could be identified and their confidential answers
+disclosed. A synthetic version of the file, generated from a model fitted to
+the confidential data, can be released instead: it reproduces the
+statistical structure, but its records are not real persons.
+
+This vignette goes through such a release step by step, and shows how to
+choose **how much noise** is introduced, by looking at disclosure risk and
+analytical utility together.
+
+```{r}
+library(SynthesizerPlus)
+library(ggplot2)
+```
+
+## The confidential file
+
+`census_sim` is a *simulated* census-like file with 5000 persons (it
+contains no real data, so the example can be shared). It has a direct
+identifier, demographic variables that an intruder could know about a
+person (**key variables** or quasi-identifiers), and confidential variables.
+
+```{r}
+str(census_sim)
+keys <- c("age", "sex", "region", "household_size")   # what an intruder may know
+sensitive <- c("income", "education")                 # what must be protected
+```
+
+## Step 1: how risky would releasing the real data be?
+
+`disclosure_risk()` measures the two classical risks.
+
+* *Identity disclosure*: records that are **unique** on the key variables
+  can be recognised. `replicated_uniques` is the share of these unique key
+  combinations that also occur exactly once in the released file.
+* *Exact copies*: synthetic records identical to a real record on all
+  variables except the direct identifier (`ignore = "person_id"`).
+* *Attribute disclosure*: an intruder who knows a person's keys looks up the
+  matching records in the released file and guesses the sensitive values
+  (most frequent category, or median for numeric variables, correct if
+  within 10%). This is the **correct attribution probability** (CAP). It is
+  compared with a *baseline* guess that uses no microdata at all.
+
+```{r}
+risk_real <- disclosure_risk(census_sim, census_sim, keys = keys, target = sensitive,
+                             ignore = "person_id")
+risk_real
+```
+
+A third of the persons are unique on four harmless-looking variables, and
+for them the intruder would learn income and education with certainty.
+
+## Step 2: a synthetic file
+
+The synthesizer is fitted to the confidential file. The direct identifier is
+declared in `id_cols` (it is replaced by new, meaningless identifiers), and
+the model is stratified by employment and sex, because income depends
+strongly on employment status.
+
+```{r}
+fit <- fit_synthesizer(census_sim, id_cols = "person_id",
+                       by = c("employment", "sex"), knots = 500)
+syn <- generate(fit, seed = 1)
+head(syn)
+disclosure_risk(census_sim, syn, keys = keys, target = sensitive,
+                ignore = "person_id")
+```
+
+The correct attribution probabilities fall to — or below — the baseline:
+knowing a person's age, sex, region and household size and looking them up
+in the synthetic file tells the intruder no more about their income or
+education than general statistics do. Even the replicated uniques are mostly
+coincidences, since synthetic key combinations are generated at random; no
+synthetic record is a copy of a real one.
+
+The argument `knots = 500` stores each continuous distribution through 500
+quantiles instead of all 5000 observed values, so that the fitted model
+itself contains no individual values.
+
+## Step 3: near-copies and the amount of noise
+
+Fully synthetic data already protect against attribute disclosure. The
+remaining risk is that some synthetic records happen to be *very close* to a
+real person — close enough to be taken as that person. `dcr()` measures it:
+`close_share` is the share of synthetic records that are closer to a real
+record than 95% of the real persons are to their nearest real neighbour. If
+synthetic records are no closer to real persons than real persons are to
+each other, `close_share` is about 5%; clearly larger values signal
+near-copies.
+
+```{r}
+conf <- census_sim[-1]                 # without the identifier
+dcr(conf, syn[-1], max_rows = 1500, seed = 1)$close_share
+```
+
+For the model above, the share is at the chance level: no noise is needed.
+Near-copies appear when the model is **too detailed** for the data, for
+example when it is stratified into many small groups. The model below
+splits the 5000 persons into 64 strata and treats all numeric variables with
+up to 60 distinct values as discrete:
+
+```{r}
+detailed <- fit_synthesizer(census_sim, id_cols = "person_id",
+                            by = c("region", "employment", "sex"),
+                            min_stratum_size = 5, discrete_threshold = 60)
+```
+
+The amount of noise is set with `closeness` (noise level = 1 −
+closeness): lower closeness smooths numeric values, re-draws some categories
+and weakens the dependence. To see what it buys, we compute for several
+noise levels the risk (`close_share`) and the utility of a typical analysis
+— a regression of income on demographic variables, compared with the same
+regression on the real data through the overlap of the confidence intervals
+(mean overlap, negative values counted as 0; 1 = identical inference).
+Results are averaged over two synthetic files per setting.
+
+```{r}
+model <- income ~ age + sex + education + employment
+risk_utility <- function(fit, closeness, seeds = 1:2) {
+  v <- sapply(seeds, function(sd) {
+    s <- generate(fit, closeness = closeness, seed = sd)
+    c(dcr(conf, s[-1], max_rows = 1500, seed = 1)$close_share,
+      mean(pmax(ci_overlap(census_sim, s, model)$overlap, 0)))
+  })
+  data.frame(noise = 1 - closeness, risk = mean(v[1, ]), utility = mean(v[2, ]))
+}
+ru <- do.call(rbind, lapply(c(1, 0.95, 0.9, 0.85, 0.8, 0.7), function(cl) {
+  cbind(model = "detailed (64 strata)", risk_utility(detailed, cl))
+}))
+ru <- rbind(ru, cbind(model = "stratified by employment x sex", risk_utility(fit, 1)))
+ru[-1] <- round(ru[-1], 3)
+ru
+```
+
+```{r, fig.height = 4.2}
+ggplot(ru, aes(risk, utility, colour = model)) +
+  geom_path(data = ru[ru$model != ru$model[nrow(ru)], ], colour = "#c3c2b7") +
+  geom_point(size = 3) +
+  geom_text(aes(label = paste("noise", noise)), vjust = -1, size = 3,
+            colour = "#52514e", show.legend = FALSE) +
+  geom_vline(xintercept = 0.05, linetype = "dashed", colour = "#898781") +
+  scale_x_reverse(expand = expansion(mult = 0.08)) +
+  scale_y_continuous(expand = expansion(mult = c(0.08, 0.15))) +
+  scale_colour_manual(values = c("#eb6834", "#2a78d6"), name = NULL) +
+  labs(x = "disclosure risk: share of near-copies (axis reversed: right is safer)",
+       y = "utility: mean CI overlap", title = "Risk-utility map") +
+  theme_minimal(base_size = 10) +
+  theme(legend.position = "top", panel.grid.minor = element_blank())
+```
+
+This *risk–utility map* (Duncan and Stokes, 2004) is the basis of the release
+decision: right is safer, up is more useful. It shows two things.
+
+* For the over-detailed model, **noise works as intended**: as the noise
+  level increases, the share of near-copies falls towards the chance level
+  (dashed line) — and the utility falls with it.
+* The **well-specified model is the better starting point**: without any
+  noise it is already at the chance level of near-copies, and it is far
+  more useful than the noisy versions of the detailed model that reach the
+  same level of risk. Pushing the detailed model slightly *below* the
+  chance level is possible, but costs most of its utility. The first lever
+  for privacy is therefore the model (not too many small strata, `knots`, a
+  sensible `discrete_threshold`); noise is the second lever, to be used in
+  small, calibrated amounts.
+
+## Step 4: set the noise to meet a risk threshold
+
+Suppose the release rule says that *at most 6% of synthetic records may be
+near-copies of real persons*, and the detailed model has to be used (for
+instance because analysts need region-by-employment detail).
+`calibrate_closeness()` accepts any risk measure as a function and finds the
+smallest amount of noise that meets the rule:
+
+```{r}
+near_copies <- function(real, synthetic) {
+  dcr(real[-1], synthetic[-1], max_rows = 1500, seed = 1)$close_share
+}
+cal <- calibrate_closeness(detailed, census_sim, target = 0.06, metric = near_copies,
+                           grid = c(0.7, 0.8, 0.9, 1), refine = 2)
+cal
+release <- generate(detailed, closeness = cal$closeness, seed = 2026)
+```
+
+The noise level to report with the release is `1 - cal$closeness`.
+
+## Step 5: check the released file
+
+Before release, verify that the file still supports the intended analyses
+and that the risk is acceptable for a new random file:
+
+```{r}
+ci_overlap(census_sim, release, model)[, c("term", "estimate_real",
+                                           "estimate_synthetic", "overlap")]
+disclosure_risk(census_sim, release, keys = keys, target = sensitive,
+                ignore = "person_id")
+dcr(conf, release[-1], max_rows = 1500, seed = 2)$close_share
+```
+
+```{r, fig.height = 3.5}
+plot_marginals(conf, release[-1], vars = c("age", "income", "household_size"))
+```
+
+The marginal distributions and the employment effects survive, but the
+effects of age and education on income are clearly attenuated. This is the
+price of the noise shown on the risk–utility map; if these effects matter
+for the users of the file, the better choice is the less detailed model,
+which meets the same risk threshold without noise.
+
+## Targeted noise
+
+Noise does not have to be the same for all variables. With `perturbation()`
+it can be concentrated where it is needed — for instance on the confidential
+income and on the key variables age and household size — while the other
+variables and the dependence structure are left untouched. (Variables used
+in `by` define the strata and cannot be perturbed.)
+
+```{r}
+targeted <- perturbation(noise = c(income = 0.5, age = 0.3), swap = c(household_size = 0.2))
+rel2 <- generate(detailed, perturb = targeted, seed = 1)
+c(risk = near_copies(census_sim, rel2),
+  utility = mean(pmax(ci_overlap(census_sim, rel2, model)$overlap, 0)))
+```
+
+## Good practice
+
+* Choose a model that does not over-fit before adding noise; check the
+  risk on the risk–utility map.
+* Remove or replace direct identifiers (`id_cols`).
+* Release the synthetic data, **never the fitted model**: unless `knots` is
+  used, the model stores the observed values of continuous variables.
+* Avoid very small strata (`min_stratum_size`), which can reproduce small
+  groups too faithfully.
+* Report the noise level and the risk and utility measures.
+* Synthetic data generated this way have **no formal privacy guarantee**
+  such as differential privacy. The measures above are empirical; they
+  depend on the chosen key variables and on what an intruder may know.
+  Review them with the disclosure control experts of your organisation.
+
+## References
+
+Duncan, G. T. and Stokes, S. L. (2004). Disclosure risk vs. data utility: the
+R-U confidentiality map as applied to topcoding. *Chance*, 17(3), 16–20.
+
+Nowok, B., Raab, G. M. and Dibben, C. (2016). synthpop: Bespoke creation of
+synthetic data in R. *Journal of Statistical Software*, 74(11), 1–26.
+
+Taub, J., Elliot, M., Pampaka, M. and Smith, D. (2018). Differential correct
+attribution probability for synthetic data: an exploration. In *Privacy in
+Statistical Databases*, LNCS 11126, 122–137.

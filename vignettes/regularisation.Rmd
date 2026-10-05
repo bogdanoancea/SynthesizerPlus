@@ -1,0 +1,294 @@
+---
+title: "Regularising high-variance models with synthetic data"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+vignette: >
+  %\VignetteIndexEntry{Regularising high-variance models with synthetic data}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+ok <- requireNamespace("rpart", quietly = TRUE) && requireNamespace("MASS", quietly = TRUE)
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7,
+                      fig.height = 4, dpi = 72, out.width = "100%", eval = ok)
+```
+
+Flexible learners such as regression trees and nearest neighbours have low
+bias but high *variance* on small samples: small changes in the training data
+produce very different models. This vignette shows that training on real
+plus synthetic data from a fitted synthesizer works as a regulariser for such
+models: it trades a little bias for a large reduction in variance. It also
+shows the limits of the idea, so that it can be used with care.
+
+```{r}
+library(SynthesizerPlus)
+library(rpart)
+library(ggplot2)
+data(Boston, package = "MASS")
+
+rmse <- function(pred, obs) sqrt(mean((pred - obs)^2))
+col_real <- "#2a78d6"
+col_aug <- "#eb6834"
+```
+
+## The idea
+
+Empirical risk minimisation fits a model to the \(n\) training points only.
+*Vicinal* risk minimisation (Chapelle et al., 2001) replaces each training
+point by a distribution around it and fits the model to that smoothed
+distribution. A synthesizer provides exactly such a smoothed distribution,
+and it respects the data: marginal distributions, bounds, discreteness,
+categories and the dependence between variables. Training on many synthetic
+records therefore penalises models that react to the idiosyncrasies of
+individual training points, which is what regularisation does.
+
+Two consequences follow, and the experiments below confirm both:
+
+* the effect is a **bias–variance trade-off**: the smoothed distribution is
+  not the true one, so some bias is added while variance falls;
+* the model must still **control its own complexity**. A model that can
+  memorise every point (a fully grown tree, 1-nearest neighbour) simply
+  memorises the synthetic noise as well.
+
+Throughout, the setting is a small training set of 60 records from the
+Boston housing data; the target is the median house value `medv`. The
+synthesizer is always fitted on the training records only, and models are
+evaluated on held-out real records.
+
+```{r}
+# four learners with very different capacity
+deep_tree <- function(d, te) {
+  predict(rpart(medv ~ ., d, control = rpart.control(cp = 0, minsplit = 2,
+                                                     minbucket = 1, xval = 0)), te)
+}
+pruned_tree <- function(d, te) {     # complexity chosen by 10-fold cross-validation
+  f <- rpart(medv ~ ., d, control = rpart.control(cp = 0, minsplit = 2,
+                                                  minbucket = 1, xval = 10))
+  cp <- f$cptable[which.min(f$cptable[, "xerror"]), "CP"]
+  predict(prune(f, cp = cp), te)
+}
+knn <- function(d, te, k) {
+  X <- scale(as.matrix(d[, names(d) != "medv"]))
+  Xt <- scale(as.matrix(te[, names(d) != "medv"]),
+              attr(X, "scaled:center"), attr(X, "scaled:scale"))
+  D <- outer(rowSums(Xt^2), rowSums(X^2), "+") - 2 * Xt %*% t(X)
+  apply(D, 1, function(dd) mean(d$medv[order(dd)[seq_len(k)]]))
+}
+learners <- list(
+  "fully grown tree" = deep_tree,
+  "CV-pruned tree" = pruned_tree,
+  "1-nearest neighbour" = function(d, te) knn(d, te, 1),
+  "5-nearest neighbours" = function(d, te) knn(d, te, 5)
+)
+```
+
+## How much synthetic data?
+
+For several random training sets we add 0 to 2000 synthetic records and
+record the test error of each learner.
+
+```{r}
+sizes <- c(0, 100, 300, 1000, 2000)
+curve <- do.call(rbind, lapply(1:8, function(r) {
+  set.seed(r)
+  idx <- sample(nrow(Boston), 60)
+  train <- Boston[idx, ]
+  test <- Boston[-idx, ]
+  syn <- generate(fit_synthesizer(train), n = max(sizes), seed = r)
+  do.call(rbind, lapply(sizes, function(s) {
+    d <- rbind(train, syn[seq_len(s), ])
+    data.frame(rep = r, synthetic = s, learner = names(learners),
+               rmse = vapply(learners, function(f) rmse(f(d, test), test$medv), numeric(1)))
+  }))
+}))
+curve$learner <- factor(curve$learner, levels = names(learners))
+avg <- aggregate(rmse ~ synthetic + learner, curve, mean)
+avg$rmse <- round(avg$rmse, 2)
+reshape(avg, idvar = "learner", timevar = "synthetic", direction = "wide")
+```
+
+```{r, fig.height = 4.5}
+ggplot(avg, aes(synthetic, rmse)) +
+  geom_line(colour = col_aug, linewidth = 0.8) +
+  geom_point(colour = col_aug, size = 2.2) +
+  facet_wrap(~learner, nrow = 1) +
+  labs(x = "synthetic records added to 60 real ones", y = "test RMSE",
+       title = "Augmentation helps learners that control their complexity") +
+  theme_minimal(base_size = 10) +
+  theme(panel.grid.minor = element_blank())
+```
+
+The two learners that can fit every single point — the fully grown tree and
+1-nearest neighbour — get *worse*: they reproduce the synthetic records,
+including the noise that the synthesizer adds. The two learners that limit
+their complexity — the tree pruned by cross-validation and 5-nearest
+neighbours — get better as synthetic data are added, with most of the gain
+reached after one or two thousand records.
+
+**Augmentation is not a substitute for the usual complexity control; it
+works together with it.** With more (synthetic) data, cross-validation can
+afford a larger tree whose predictions are still stable.
+
+## Where the gain comes from: bias and variance
+
+To separate bias from variance, we fix a test set and draw many different
+training sets of 60 records from the remaining data. For every test point we
+record the mean and the spread of the predictions over the training sets.
+
+```{r}
+set.seed(42)
+test_idx <- sample(nrow(Boston), 200)
+test <- Boston[test_idx, ]
+pool <- Boston[-test_idx, ]
+
+R <- 20
+pred_real <- pred_aug <- matrix(NA_real_, R, nrow(test))
+for (r in seq_len(R)) {
+  train <- pool[sample(nrow(pool), 60), ]
+  pred_real[r, ] <- pruned_tree(train, test)
+  pred_aug[r, ] <- pruned_tree(augment_data(train, n = 2000, seed = r), test)
+}
+decompose <- function(P) {
+  c(bias2 = mean((colMeans(P) - test$medv)^2),
+    variance = mean(apply(P, 2, var)),
+    mse = mean(sweep(P, 2, test$medv)^2))
+}
+bv <- rbind(real = decompose(pred_real), augmented = decompose(pred_aug))
+round(bv, 1)
+```
+
+```{r, fig.height = 3.5}
+bv_long <- data.frame(
+  training = factor(rep(c("real only", "real + synthetic"), 3),
+                    levels = c("real only", "real + synthetic")),
+  component = factor(rep(c("squared bias", "variance", "mean squared error"), each = 2),
+                     levels = c("squared bias", "variance", "mean squared error")),
+  value = as.vector(bv)
+)
+ggplot(bv_long, aes(component, value, fill = training)) +
+  geom_col(position = position_dodge2(padding = 0.15), width = 0.7) +
+  scale_fill_manual(values = c(col_real, col_aug), name = NULL) +
+  labs(x = NULL, y = NULL, title = "CV-pruned tree trained on 60 records") +
+  theme_minimal(base_size = 10) +
+  theme(legend.position = "top", panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank())
+```
+
+The variance of the predictions drops by roughly two thirds, while the
+squared bias increases noticeably: the synthesizer's smoothed distribution is
+not the true one. Because the variance reduction is larger than the bias
+increase, the total error falls: a classical regularisation trade-off.
+
+## Seeing the variance
+
+The effect is easy to see with a single predictor. Below, a CV-pruned tree
+predicts `medv` from `lstat` (share of lower-status population), trained on
+15 different samples of 60 records. Each line is one fitted model.
+
+```{r, fig.height = 4}
+grid <- data.frame(lstat = seq(2, 35, length.out = 200))
+fits <- do.call(rbind, lapply(1:15, function(r) {
+  set.seed(100 + r)
+  train <- pool[sample(nrow(pool), 60), c("lstat", "medv")]
+  aug <- augment_data(train, n = 2000, seed = r)
+  rbind(data.frame(grid, medv = pruned_tree(train, grid), run = r, training = "real only"),
+        data.frame(grid, medv = pruned_tree(aug, grid), run = r, training = "real + synthetic"))
+}))
+fits$training <- factor(fits$training, levels = c("real only", "real + synthetic"))
+ggplot(fits, aes(lstat, medv, group = run, colour = training)) +
+  geom_point(data = Boston, aes(lstat, medv), inherit.aes = FALSE,
+             colour = "grey80", size = 0.6) +
+  geom_step(alpha = 0.6, linewidth = 0.5) +
+  facet_wrap(~training) +
+  scale_colour_manual(values = c(col_real, col_aug), guide = "none") +
+  labs(title = "15 trees, each trained on a different sample of 60 records") +
+  theme_minimal(base_size = 10) +
+  theme(panel.grid.minor = element_blank())
+```
+
+Trained on the real records alone, the trees disagree strongly, and many
+are coarse step functions. With synthetic records, the trees are larger and
+smoother and they agree much more with each other.
+
+## Compared with bagging
+
+Bagging (bootstrap aggregation) is the classical way to reduce the variance
+of trees. How does augmentation compare, and can the two be combined?
+
+```{r}
+bagged_trees <- function(d, te, B = 25) {
+  rowMeans(sapply(seq_len(B), function(b) {
+    db <- d[sample(nrow(d), replace = TRUE), ]
+    predict(rpart(medv ~ ., db, control = rpart.control(cp = 0, minsplit = 5, xval = 0)), te)
+  }))
+}
+cmp <- t(sapply(1:8, function(r) {
+  set.seed(r)
+  idx <- sample(nrow(Boston), 60)
+  train <- Boston[idx, ]
+  test <- Boston[-idx, ]
+  aug <- augment_data(train, n = 2000, seed = r)
+  c(`pruned tree` = rmse(pruned_tree(train, test), test$medv),
+    `pruned tree + synthetic` = rmse(pruned_tree(aug, test), test$medv),
+    `bagged trees` = rmse(bagged_trees(train, test), test$medv),
+    `bagged trees + synthetic` = rmse(bagged_trees(aug, test), test$medv))
+}))
+round(colMeans(cmp), 2)
+```
+
+On this problem bagging alone is more effective than augmenting a single
+pruned tree, and combining both gives a further small improvement. Synthetic
+data are therefore best seen as one more regulariser in the toolbox — one
+that is particularly useful when the model class cannot easily be
+ensembled, or when the training pipeline expects a single, larger data set
+(e.g. a neural network).
+
+## Tuning the amount of synthetic data
+
+The amount of synthetic data (and the synthesizer settings, such as `by`,
+`copula` or `knots`) are tuning parameters. Choose them by cross-validation
+**inside the training data**, refitting the synthesizer in every fold so
+that the validation fold is never seen by the synthesizer:
+
+```{r}
+cv_augmentation <- function(train, sizes, learner, folds = 5, seed = 1) {
+  set.seed(seed)
+  fold <- sample(rep_len(seq_len(folds), nrow(train)))
+  err <- sapply(sizes, function(s) {
+    mean(sapply(seq_len(folds), function(k) {
+      fit_part <- train[fold != k, ]
+      valid <- train[fold == k, ]
+      d <- if (s == 0) fit_part else augment_data(fit_part, n = s, seed = k)
+      rmse(learner(d, valid), valid$medv)
+    }))
+  })
+  data.frame(synthetic = sizes, cv_rmse = err)
+}
+set.seed(7)
+train <- Boston[sample(nrow(Boston), 60), ]
+cv_augmentation(train, sizes = c(0, 500, 2000), learner = pruned_tree)
+```
+
+## Summary
+
+* Synthetic data from a fitted synthesizer regularise flexible learners: on
+  small samples they reduce the variance of the fitted models at the cost of
+  a moderate increase in bias.
+* They work **together with** ordinary complexity control (pruning,
+  `k > 1`, weight decay, early stopping), not instead of it. Models that can
+  memorise individual points get worse.
+* Compare against other variance-reduction techniques such as bagging; the
+  best results may come from combining them.
+* Treat the amount of synthetic data and the synthesizer settings as tuning
+  parameters, chosen by cross-validation within the training data, and
+  always report the error on real held-out data.
+
+## References
+
+Chapelle, O., Weston, J., Bottou, L. and Vapnik, V. (2001). Vicinal risk
+minimization. In *Advances in Neural Information Processing Systems 13*,
+416–422.
+
+Breiman, L. (1996). Bagging predictors. *Machine Learning*, 24(2), 123–140.

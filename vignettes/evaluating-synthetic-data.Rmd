@@ -1,0 +1,149 @@
+---
+title: "Evaluating and visualising synthetic data"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+vignette: >
+  %\VignetteIndexEntry{Evaluating and visualising synthetic data}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7,
+                      fig.height = 4.2, dpi = 72, out.width = "100%")
+```
+
+Synthetic data are only useful if they are *faithful* to the real data,
+*useful* for the analyses people will run, and *safe* to release. No single
+number captures all three, so SynthesizerPlus provides a set of
+complementary measures and plots.
+
+```{r}
+library(SynthesizerPlus)
+real <- airquality
+syn <- synthesize(real, by = "Month", seed = 1)
+```
+
+## Everything at once: `compare_synthetic()`
+
+```{r}
+cmp <- compare_synthetic(real, syn, seed = 1)
+cmp
+summary(cmp)
+```
+
+The `ideal` column of `summary()` gives the value expected for a perfect
+synthesizer that still produces new records. The components are described
+below.
+
+## Marginal fidelity
+
+`marginal_metrics()` reports, for each variable, the Kolmogorov–Smirnov
+distance (numeric) or the total variation distance (categorical), the
+Wasserstein-1 distance in units of the real standard deviation, and moments
+and missing-value rates.
+
+```{r}
+marginal_metrics(real, syn)[, c("variable", "distance", "wasserstein",
+                                "mean_real", "mean_synthetic",
+                                "missing_real", "missing_synthetic")]
+```
+
+```{r, fig.height = 5}
+plot_marginals(real, syn)
+plot_qq(real, syn)
+```
+
+For categorical variables, `plot_marginals()` (or `plot_categorical()`) shows
+the category shares side by side:
+
+```{r}
+syn_iris <- synthesize(iris, by = "Species", seed = 1)
+plot_categorical(iris, syn_iris)
+```
+
+## Dependence
+
+`association_matrix()` works for mixed data: Spearman correlation for pairs
+of numeric variables, bias-corrected Cramér's V for pairs of categorical
+variables and the correlation ratio for mixed pairs.
+
+```{r, fig.height = 4}
+plot_association(real, syn, vars = c("Ozone", "Solar.R", "Wind", "Temp"))
+```
+
+## General utility: can a classifier tell them apart?
+
+If real and synthetic records are exchangeable, a classifier should not be
+able to predict which set a record comes from.
+
+* **pMSE** (Snoke et al., 2018) is the mean squared deviation of the
+  estimated propensity scores from the share of synthetic records. Its ratio
+  to the expected value under the null of identical distributions should be
+  close to 1.
+* The **discriminator AUC** is computed from cross-validated predictions;
+  0.5 means indistinguishable.
+
+```{r}
+pmse(real, syn, seed = 1)
+discriminator_auc(real, syn, seed = 1)
+```
+
+## Specific utility: do analyses give the same answers?
+
+`ci_overlap()` fits the same regression to both data sets and compares the
+confidence intervals (Karr et al., 2006):
+
+```{r}
+ci_overlap(real, syn, Ozone ~ Temp + Wind + Solar.R)[, c("term", "estimate_real",
+                                                        "estimate_synthetic",
+                                                        "std_diff", "overlap")]
+```
+
+Overlaps close to 1 mean that inference on synthetic data leads to the same
+conclusions.
+
+## Disclosure risk: distance to closest record
+
+A synthesizer that copies real records has perfect fidelity but no privacy.
+`dcr()` computes, for each synthetic record, the Gower distance to the
+closest real record, and compares it to how close real records are to each
+other.
+
+```{r}
+risk <- dcr(real, syn, seed = 1)
+risk$quantiles
+risk$exact_match_rate
+plot_dcr(risk)
+```
+
+Exact copies, or a synthetic distance distribution well to the left of the
+real one, are warning signs. Remedies include `knots` (coarser quantile
+functions), lowering `dependence`, or a larger `min_stratum_size`.
+
+## Plots from a comparison object
+
+All plots are also available from the comparison object:
+
+```{r, eval = FALSE}
+plot(cmp, type = "marginals")
+plot(cmp, type = "association")
+plot(cmp, type = "pairs")
+plot(cmp, type = "qq")
+plot(cmp, type = "dcr")
+ggplot2::autoplot(cmp, type = "association") + ggplot2::ggtitle("airquality")
+```
+
+Every plotting function returns a `ggplot` object, so themes, scales and
+labels can be changed with the usual **ggplot2** syntax.
+
+## References
+
+Karr, A. F., Kohnen, C. N., Oganian, A., Reiter, J. P. and Sanil, A. P.
+(2006). A framework for evaluating the utility of data altered to protect
+confidentiality. *The American Statistician*, 60(3), 224–232.
+
+Snoke, J., Raab, G. M., Nowok, B., Dibben, C. and Slavkovic, A. (2018).
+General and specific utility measures for synthetic data. *Journal of the
+Royal Statistical Society A*, 181(3), 663–688.

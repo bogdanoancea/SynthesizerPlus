@@ -1,0 +1,87 @@
+---
+title: "Synthetic time series"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+vignette: >
+  %\VignetteIndexEntry{Synthetic time series}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7,
+                      fig.height = 4, dpi = 72, out.width = "100%")
+```
+
+For time series the order of the observations carries information: a
+synthetic series should reproduce the marginal distribution *and* the
+autocorrelation (and, for several series, the cross-correlation).
+`fit_synthesizer()` has a method for `ts` objects with four generators.
+
+```{r}
+library(SynthesizerPlus)
+```
+
+| `method` | What it preserves | How |
+|---|---|---|
+| `"copula_var"` (default) | marginals, auto- and cross-correlation | VAR on normal scores, bootstrapped innovations |
+| `"block"` | short-range dependence, exact values | moving (circular) block bootstrap |
+| `"stationary"` | short-range dependence, exact values | stationary bootstrap (Politis & Romano, 1994) |
+| `"iid"` | marginals and contemporaneous correlation only | cross-sectional copula |
+
+## Copula-VAR
+
+Each series is transformed to normal scores through its empirical
+distribution, a vector autoregression is fitted (order chosen by AIC up to
+`max_lag`), new paths are simulated with innovations resampled from the
+fitted residuals, and the paths are mapped back through the empirical
+quantile functions.
+
+```{r}
+fit <- fit_synthesizer(ldeaths)
+fit
+syn <- generate(fit, seed = 1)
+plot_ts(ldeaths, syn)
+plot_acf(ldeaths, syn, lag_max = 24)
+```
+
+Synthetic series can be of any length and start anywhere:
+
+```{r}
+long <- generate(fit, n = 240, start = c(1980, 1), seed = 2)
+tsp(long)
+```
+
+### Several series
+
+```{r}
+returns <- diff(log(EuStockMarkets))
+fit_mv <- fit_synthesizer(returns)
+syn_mv <- generate(fit_mv, seed = 1)
+round(cor(returns) - cor(syn_mv), 3)
+```
+
+## Bootstraps
+
+Block bootstraps resample stretches of the observed series, so they keep
+short-range dependence and the exact values (and non-linear features within
+blocks), at the price of repeating observed values:
+
+```{r}
+fit_b <- fit_synthesizer(lh, method = "stationary", block_length = 8)
+syn_b <- generate(fit_b, n = 96, seed = 1)
+plot_ts(lh, syn_b)
+```
+
+## Practical notes
+
+* The copula-VAR assumes (approximately) stationary dynamics. For trending
+  series, model the differences or growth rates and cumulate afterwards.
+* Missing values are linearly interpolated before fitting, with a warning.
+* `simulate(fit, nsim = 10)` returns ten independent synthetic series.
+
+## References
+
+Politis, D. N. and Romano, J. P. (1994). The stationary bootstrap. *Journal
+of the American Statistical Association*, 89(428), 1303–1313.

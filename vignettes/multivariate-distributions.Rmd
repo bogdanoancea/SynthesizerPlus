@@ -1,0 +1,159 @@
+---
+title: "Generating data from multivariate distributions"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+vignette: >
+  %\VignetteIndexEntry{Generating data from multivariate distributions}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7,
+                      fig.height = 4.5, dpi = 72, out.width = "100%")
+```
+
+Besides learning from real data, SynthesizerPlus can generate data from
+fully specified multivariate distributions. This is useful for simulation
+studies, for teaching, and for benchmarking synthesizers against data with a
+*known* dependence structure. All generators accept a `seed` argument and
+need no additional packages.
+
+```{r}
+library(SynthesizerPlus)
+```
+
+## Correlation matrices
+
+`make_corr()` builds common correlation structures:
+
+```{r}
+make_corr(4, "ar1", rho = 0.6)
+make_corr(3, "exchangeable", rho = 0.3, names = c("x", "y", "z"))
+R <- make_corr(5, "random")
+round(R, 2)
+```
+
+## Classical multivariate distributions
+
+| Function | Distribution |
+|---|---|
+| `r_mvnorm()` | multivariate normal |
+| `r_mvt()` | multivariate Student-*t* |
+| `r_mvlnorm()` | multivariate log-normal |
+| `r_mvskewnorm()` | multivariate skew-normal (Azzalini & Dalla Valle, 1996) |
+| `r_dirichlet()` | Dirichlet (compositional data) |
+| `r_mvmixture()` | finite mixture of multivariate normals |
+
+```{r}
+S <- make_corr(3, "ar1", 0.7)
+x <- r_mvnorm(2000, mean = c(0, 5, 10), sigma = S, seed = 1)
+round(colMeans(x), 2)
+round(cor(x), 2)
+
+t3 <- r_mvt(2000, df = 3, sigma = S, seed = 1)
+c(normal = max(abs(x[, 1])), t3 = max(abs(t3[, 1])))
+```
+
+The skew-normal adds asymmetry through the shape vector `alpha`:
+
+```{r}
+sn <- r_mvskewnorm(2000, omega = make_corr(2, "exchangeable", 0.5),
+                   alpha = c(8, -3), seed = 1)
+plot_pairs(as.data.frame(sn))
+```
+
+Mixtures produce multimodal data, e.g. latent clusters:
+
+```{r}
+mix <- r_mvmixture(1500, weights = c(0.5, 0.3, 0.2),
+                   means = list(c(0, 0), c(4, 4), c(-3, 5)),
+                   sigmas = list(diag(2), make_corr(2, "exchangeable", 0.8),
+                                 diag(c(0.5, 2))),
+                   seed = 1)
+plot_pairs(as.data.frame(mix))
+```
+
+Compositional data (shares that sum to one):
+
+```{r}
+shares <- r_dirichlet(5, alpha = c(agriculture = 2, industry = 5, services = 10), seed = 1)
+round(shares, 3)
+```
+
+## Copulas
+
+`r_copula()` samples from Gaussian, *t*, Clayton, Gumbel and Frank copulas
+(uniform margins). Archimedean copulas in more than two dimensions use the
+Marshall–Olkin frailty construction; their Kendall's tau is a known function
+of `theta`:
+
+| Family | Kendall's tau | Tail dependence |
+|---|---|---|
+| Clayton | \(\theta/(\theta+2)\) | lower |
+| Gumbel | \(1 - 1/\theta\) | upper |
+| Frank | (no closed form) | none |
+
+```{r}
+u_c <- r_copula(3000, "clayton", dim = 2, theta = 2, seed = 1)
+u_g <- r_copula(3000, "gumbel", dim = 2, theta = 2, seed = 1)
+c(clayton = cor(u_c, method = "kendall")[1, 2],
+  gumbel = cor(u_g, method = "kendall")[1, 2])
+```
+
+Both have tau = 0.5, but extremes cluster in opposite tails:
+
+```{r}
+both <- rbind(data.frame(u1 = u_c[, 1], u2 = u_c[, 2], copula = "Clayton (theta = 2)"),
+              data.frame(u1 = u_g[, 1], u2 = u_g[, 2], copula = "Gumbel (theta = 2)"))
+ggplot2::ggplot(both, ggplot2::aes(u1, u2)) +
+  ggplot2::geom_point(alpha = 0.25, size = 0.6, colour = "#2a78d6") +
+  ggplot2::facet_wrap(~copula) +
+  ggplot2::coord_equal() +
+  ggplot2::theme_minimal()
+```
+
+## Arbitrary margins: `r_mvdist()`
+
+`r_mvdist()` couples any copula with any marginal distributions, returning a
+data frame. Margins can be names of distributions with a `q*` function,
+lists of parameters, or quantile functions — including categorical margins
+from `margin_categorical()` and empirical margins learned from data with
+`margin_empirical()`.
+
+```{r}
+sim <- r_mvdist(
+  1000,
+  margins = list(
+    income = list(dist = "lnorm", meanlog = 10, sdlog = 0.6),
+    age = list(dist = "unif", min = 18, max = 80),
+    children = list(dist = "pois", lambda = 1.5),
+    sector = margin_categorical(c("agri", "industry", "services"), c(0.1, 0.3, 0.6)),
+    eruption = margin_empirical(faithful$eruptions)
+  ),
+  copula = "t", corr = make_corr(5, "exchangeable", 0.4), df = 4, seed = 1
+)
+str(sim)
+round(association_matrix(sim), 2)
+```
+
+Such data sets are convenient test beds for synthesizers, because the true
+dependence is known:
+
+```{r}
+syn <- synthesize(sim, seed = 2)
+summary(compare_synthetic(sim, syn, seed = 1))
+```
+
+## References
+
+Azzalini, A. and Dalla Valle, A. (1996). The multivariate skew-normal
+distribution. *Biometrika*, 83(4), 715–726.
+
+Hofert, M. (2008). Sampling Archimedean copulas. *Computational Statistics &
+Data Analysis*, 52(12), 5163–5174.
+
+Marshall, A. W. and Olkin, I. (1988). Families of multivariate
+distributions. *Journal of the American Statistical Association*, 83(403),
+834–841.

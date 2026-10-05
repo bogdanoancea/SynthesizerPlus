@@ -1,0 +1,14 @@
+^.*\.Rproj$
+^\.Rproj\.user$
+^\.RData$
+^\.Rhistory$
+^\.DS_Store$
+.*/\.DS_Store$
+^README\.Rmd$
+^cran-comments\.md$
+^LICENSE\.md$
+^_to_delete$
+^data-raw$
+^\.github$
+^doc$
+^Meta$

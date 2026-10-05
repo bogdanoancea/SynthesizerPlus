@@ -1,0 +1,58 @@
+Package: SynthesizerPlus
+Type: Package
+Title: Synthetic Data Generation with Copulas, Evaluation and Multi-Format I/O
+Version: 0.2.0
+Authors@R:
+    person("Bogdan", "Oancea", email = "bogdan.oancea@gmail.com",
+           role = c("aut", "cre", "cph"))
+Description: Generates synthetic versions of numeric, categorical, mixed-type
+    and time-series data. Marginal distributions are modelled with empirical
+    quantile functions and dependence with Gaussian or Student-t copulas
+    (Sklar, 1959), using the distributional transform (Ruschendorf, 2009,
+    <doi:10.1016/j.jspi.2009.05.030>) so that categorical variables and
+    missing-value patterns take part in the dependence structure. Supports
+    stratified models, multiple synthetic data sets, chunked generation of
+    very large data sets, vector-autoregressive and bootstrap time-series
+    synthesis, augmentation of small training sets for machine learning,
+    and random generation from multivariate distributions and
+    elliptical and Archimedean copulas. Fidelity, utility and disclosure risk
+    are assessed with marginal distances, association matrices, propensity
+    score mean-squared error (Snoke et al., 2018, <doi:10.1111/rssa.12358>),
+    confidence-interval overlap and distance to closest record, with
+    'ggplot2' visualisations. Data can be read from and written to CSV, TSV,
+    RDS, RData, Parquet, Feather, HDF5, JSON, NDJSON, Excel, SPSS, Stata,
+    SAS and fst files. The empirical-quantile and copula approach builds on
+    ideas of the 'synthesizer' package by Mark van der Loo.
+License: EUPL
+URL: https://github.com/bogdanoancea/SynthesizerPlus
+BugReports: https://github.com/bogdanoancea/SynthesizerPlus/issues
+Depends:
+    R (>= 4.1.0)
+Imports:
+    ggplot2 (>= 3.4.0),
+    stats,
+    tools,
+    utils
+Suggests:
+    arrow,
+    data.table,
+    fst,
+    haven,
+    hdf5r,
+    jsonlite,
+    knitr,
+    MASS,
+    nanoparquet,
+    openxlsx,
+    readxl,
+    rmarkdown,
+    rpart,
+    testthat (>= 3.0.0),
+    writexl
+VignetteBuilder: knitr
+Config/testthat/edition: 3
+Encoding: UTF-8
+LazyData: true
+Language: en-GB
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.1

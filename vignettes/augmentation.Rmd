@@ -1,0 +1,141 @@
+---
+title: "Augmenting small training sets for machine learning"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+vignette: >
+  %\VignetteIndexEntry{Augmenting small training sets for machine learning}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+ok <- requireNamespace("rpart", quietly = TRUE) && requireNamespace("MASS", quietly = TRUE)
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7,
+                      fig.height = 4, dpi = 72, out.width = "100%", eval = ok)
+```
+
+Machine-learning models often need more data than we have. A synthesizer
+fitted to a small sample can generate as many additional training records
+as needed. This vignette shows how to do that with `augment_data()` and,
+just as importantly, how to check whether it actually helps.
+
+```{r}
+library(SynthesizerPlus)
+library(rpart)
+```
+
+## What augmentation can and cannot do
+
+A synthesizer only knows what is in its training sample, so synthetic data
+**add no new information**. What they provide is a *smoothed* version of the
+training distribution: new combinations of values that are plausible under
+the fitted marginals and copula. For flexible, high-variance learners
+(regression trees, nearest neighbours, boosting, neural networks) trained on
+a small sample this acts as a regulariser and can reduce the prediction
+error. For a model that is already smooth, such as linear regression, there
+is little to gain.
+
+Whether it helps must therefore be **measured**, following four rules:
+
+1. split the real data into a training and a test set first;
+2. fit the synthesizer on the training set only;
+3. evaluate on the held-out *real* test set (never on synthetic data);
+4. repeat over several random splits.
+
+## Tabular data: 60 observations
+
+We pretend that only 60 records of the Boston housing data are available
+and predict the median house value `medv`.
+
+```{r}
+data(Boston, package = "MASS")
+rmse <- function(pred, obs) sqrt(mean((pred - obs)^2))
+tree <- function(f, d) rpart(f, d, control = rpart.control(cp = 0.005, minsplit = 5))
+
+one_split <- function(seed) {
+  set.seed(seed)
+  idx <- sample(nrow(Boston), 60)
+  train <- Boston[idx, ]
+  test <- Boston[-idx, ]
+  big <- augment_data(train, n = 2000, seed = seed)   # 60 real + 2000 synthetic
+  c(tree_real = rmse(predict(tree(medv ~ ., train), test), test$medv),
+    tree_augmented = rmse(predict(tree(medv ~ ., big), test), test$medv),
+    lm_real = rmse(predict(lm(medv ~ ., train), test), test$medv),
+    lm_augmented = rmse(predict(lm(medv ~ ., big), test), test$medv))
+}
+res <- t(sapply(1:6, one_split))
+round(colMeans(res), 2)
+mean(res[, "tree_augmented"] < res[, "tree_real"])
+```
+
+The regression tree improves clearly and consistently; the linear model does
+not. Before training, it is worth checking that the synthetic training data
+resemble the real training data:
+
+```{r, fig.height = 4.5}
+set.seed(1)
+train <- Boston[sample(nrow(Boston), 60), ]
+syn <- generate(fit_synthesizer(train), n = 2000, seed = 1)
+plot_marginals(train, syn, vars = c("medv", "lstat", "rm", "crim"))
+```
+
+`augment_data()` accepts all arguments of `fit_synthesizer()`, e.g. `by =`
+to stratify on a categorical variable, and `label =` to add a column marking
+the synthetic rows (useful for down-weighting them in training).
+
+## Time series: forecasting from a short history
+
+For forecasting, an ML model is trained on windows of lagged values. With one
+short series there are few windows; `augment_data()` on a `ts` object returns
+the real series followed by `nsim` synthetic series, and `ts_windows()`
+stacks the windows of all of them.
+
+We use the first 48 months of `ldeaths` for training and forecast the last
+24 months one step ahead.
+
+```{r}
+lags <- 12
+n_train <- 48
+train_ts <- window(ldeaths, end = time(ldeaths)[n_train])
+all_w <- ts_windows(ldeaths, lags = lags)
+test_w <- all_w[(n_train - lags + 1):nrow(all_w), ]   # targets in the test period
+
+forecast_rmse <- function(seed) {
+  series <- augment_data(train_ts, nsim = 50, order = 12, seed = seed)
+  real_w <- ts_windows(series[1], lags = lags)
+  aug_w <- ts_windows(series, lags = lags)
+  real_w$series <- aug_w$series <- NULL
+  c(tree_real = rmse(predict(tree(y ~ ., real_w), test_w), test_w$y),
+    tree_augmented = rmse(predict(tree(y ~ ., aug_w), test_w), test_w$y),
+    lm_real = rmse(predict(lm(y ~ ., real_w), test_w), test_w$y))
+}
+round(colMeans(t(sapply(1:6, forecast_rmse))), 1)
+```
+
+Two lessons:
+
+* Augmentation again helps the tree, but the linear autoregression on the
+  real data is still the best forecaster here. Synthetic data make a
+  flexible model better, not necessarily better than a well-specified simple
+  one.
+* The synthesizer must reproduce the structure the forecaster relies on.
+  For monthly data with a short history, AIC selects a VAR order below the
+  seasonal period, and the synthetic series then lack the yearly cycle;
+  fixing `order = 12` solves this. Always compare the autocorrelation of
+  real and synthetic series:
+
+```{r}
+fit_ts <- fit_synthesizer(train_ts, order = 12)
+plot_acf(train_ts, generate(fit_ts, n = 2000, seed = 3), lag_max = 24)
+```
+
+## Checklist
+
+* Fit the synthesizer on training data only; evaluate on real test data.
+* Compare at least: real only, real + synthetic, and a simple baseline.
+* Inspect the synthetic training data (`compare_synthetic()`,
+  `plot_marginals()`, `plot_acf()`) before trusting the results.
+* Tune the amount of synthetic data and the synthesizer settings
+  (`by`, `copula`, `order`) with cross-validation on the training data,
+  not on the test set.

@@ -1,0 +1,148 @@
+---
+title: "Reading and writing data: CSV, Parquet, HDF5 and more"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+vignette: >
+  %\VignetteIndexEntry{Reading and writing data: CSV, Parquet, HDF5 and more}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+has <- function(p) requireNamespace(p, quietly = TRUE)
+```
+
+Real data come in many formats, and synthetic data often have to be delivered
+in the format of the original. SynthesizerPlus offers one pair of functions,
+`read_data()` and `write_data()`, that dispatch on the file extension.
+
+```{r}
+library(SynthesizerPlus)
+```
+
+## Supported formats
+
+```{r}
+supported_formats()
+```
+
+Only CSV, TSV, RDS and RData need nothing beyond base R. The other backends
+are optional: install the package listed in the `read`/`write` columns for
+the formats you need (for example `install.packages("arrow")` for Parquet and
+Feather). The `available` column shows what is installed on this machine.
+Text formats can be compressed by appending `.gz`, `.bz2` or `.xz`.
+
+## Writing and reading
+
+```{r}
+dir <- tempfile("sp-formats-")
+dir.create(dir)
+syn <- synthesize(iris, n = 300, seed = 1)
+
+write_data(syn, file.path(dir, "iris.csv"))
+write_data(syn, file.path(dir, "iris.tsv.gz"))
+write_data(syn, file.path(dir, "iris.rds"))
+list.files(dir)
+```
+
+Text formats do not store R classes. Pass a `template` to restore them —
+factor levels, `Date`, `POSIXct` (with time zone), integer and logical
+columns:
+
+```{r}
+x <- read_data(file.path(dir, "iris.csv"))
+class(x$Species)
+x <- read_data(file.path(dir, "iris.csv"), template = iris)
+levels(x$Species)
+```
+
+`match_types()` does the same for any data frame you read by other means.
+
+### Parquet and Feather (Apache Arrow)
+
+Columnar formats are the usual choice for large data in data science
+pipelines (Spark, Python/pandas, DuckDB, Polars). Parquet is read and written
+with **arrow** or, if that is not installed, the lightweight **nanoparquet**;
+Feather / Arrow IPC needs **arrow**.
+
+```{r, eval = has("arrow") || has("nanoparquet")}
+f <- file.path(dir, "iris.parquet")
+write_data(syn, f)
+str(read_data(f))
+```
+
+### HDF5
+
+HDF5 is common in scientific computing and is readable from Python (`h5py`,
+`pandas`), MATLAB and Julia. `write_data()` stores one dataset per column in
+a group (`dataset = "data"` by default), with attributes that record column
+names, factor levels, dates and time zones; `read_data()` restores the data
+frame exactly. A plain 1- or 2-dimensional dataset written by other software
+can be read by giving its name in `dataset`.
+
+```{r, eval = has("hdf5r")}
+f <- file.path(dir, "iris.h5")
+write_data(syn, f)
+identical(read_data(f), syn)
+```
+
+### JSON, NDJSON, Excel, SPSS, Stata, SAS, fst
+
+```{r, eval = has("jsonlite")}
+write_data(head(syn, 2), file.path(dir, "iris.json"))
+cat(readLines(file.path(dir, "iris.json")), sep = "\n")
+```
+
+```{r, eval = has("haven")}
+write_data(syn, file.path(dir, "iris.sav"))   # SPSS
+str(read_data(file.path(dir, "iris.sav")))
+write_data(syn, file.path(dir, "iris.dta"))   # Stata: names are made valid
+names(read_data(file.path(dir, "iris.dta")))
+```
+
+Value labels from SPSS/Stata files are converted to factors when reading.
+Stata only allows letters, digits and underscores in variable names, so
+`write_data()` renames columns such as `Sepal.Length` (with a warning).
+
+## Synthesising straight from a file to a file
+
+```{r}
+real <- read_data(file.path(dir, "iris.rds"))
+synthesize(real, n = 1000, seed = 1, file = file.path(dir, "synthetic.csv.gz"))
+nrow(read_data(file.path(dir, "synthetic.csv.gz")))
+```
+
+## Very large synthetic data sets
+
+`generate_to_file()` generates data in chunks, so the full data set never has
+to fit in memory. Appendable formats (CSV, TSV, NDJSON) are written to a
+single file; for other formats a directory of part files is created, which
+`read_data()` — or `arrow::open_dataset()`, Spark, DuckDB — reads as one
+table.
+
+```{r}
+fit <- fit_synthesizer(iris)
+res <- generate_to_file(fit, n = 50000, path = file.path(dir, "big.csv"),
+                        chunk_size = 10000, seed = 1)
+nrow(read_data(file.path(dir, "big.csv")))
+
+res <- generate_to_file(fit, n = 50000, path = file.path(dir, "big_rds"),
+                        format = "rds", chunk_size = 20000, seed = 1)
+basename(res$files)
+nrow(read_data(file.path(dir, "big_rds")))
+```
+
+```{r, eval = FALSE}
+# e.g. 100 million rows as a partitioned Parquet data set
+generate_to_file(fit, n = 1e8, path = "synthetic_parquet", format = "parquet",
+                 chunk_size = 1e6, seed = 1)
+ds <- arrow::open_dataset("synthetic_parquet")
+```
+
+Output is reproducible for a given `seed` and `chunk_size`.
+
+```{r, include = FALSE}
+unlink(dir, recursive = TRUE)
+```

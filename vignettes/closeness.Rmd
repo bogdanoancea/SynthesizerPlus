@@ -1,0 +1,176 @@
+---
+title: "Controlling how close synthetic data are to the real data"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+vignette: >
+  %\VignetteIndexEntry{Controlling how close synthetic data are to the real data}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+ok <- requireNamespace("MASS", quietly = TRUE)
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7,
+                      fig.height = 4, dpi = 72, out.width = "100%", eval = ok)
+```
+
+Sometimes synthetic data should be as faithful as possible; sometimes they
+should deliberately be *further* from the real data, for example
+
+* to lower the disclosure risk of a release (records far from any real
+  record),
+* to create more diverse training data for machine learning, or
+* to build stress-test scenarios in which distributions are shifted, more
+  spread out or differently correlated.
+
+SynthesizerPlus offers three levels of control:
+
+| Tool | What it does |
+|---|---|
+| `generate(..., closeness = )` | one knob from 1 (as close as possible) to 0 (far) |
+| `generate(..., perturb = perturbation(...))` | separate record-level and distribution-level settings |
+| `calibrate_closeness()` | finds the `closeness` that reaches a target distance |
+
+```{r}
+library(SynthesizerPlus)
+data(Boston, package = "MASS")
+fit <- fit_synthesizer(Boston)
+```
+
+## One knob: `closeness`
+
+```{r}
+grid <- c(1, 0.8, 0.6, 0.4, 0.2, 0)
+dist <- t(sapply(grid, function(cl) {
+  syn <- generate(fit, closeness = cl, seed = 1)
+  c(closeness = cl,
+    `discriminator AUC` = discriminator_auc(Boston, syn, seed = 1),
+    `DCR ratio` = dcr(Boston, syn, seed = 1)$ratio,
+    `marginal distance` = mean(marginal_metrics(Boston, syn)$distance),
+    `association error` = mean(abs(association_matrix(syn) - association_matrix(Boston))))
+}))
+round(dist, 3)
+```
+
+As `closeness` decreases, a classifier distinguishes synthetic from real
+records more easily (higher AUC), synthetic records are further from their
+nearest real record (higher DCR ratio, see `?dcr`), and the marginal
+distributions and associations drift away from the real ones.
+
+Note that even at `closeness = 1` the discriminator AUC is above 0.5: the
+synthesizer is a model of the data and the classifier, which uses squares
+and interactions of all variables, picks up the remaining differences.
+`closeness = 1` is the closest the model can get; it is not a copy of the
+data.
+
+Internally, `closeness` \(c\) is translated into a perturbation with
+\(d = 1 - c\):
+
+| setting | value | effect |
+|---|---|---|
+| `noise` | \(1.5\,d\) | smoothing of continuous variables |
+| `swap` | \(0.5\,d\) | re-drawing of categorical/discrete values |
+| `temperature` | \(1 + d\) | flatter category probabilities |
+| `dependence` | \(c\) | weaker dependence between variables |
+
+## Record level: further from real records, same distributions
+
+`noise` replaces each continuous value by a smoothed version that keeps the
+mean and variance of the variable; `swap` re-draws categorical and discrete
+values from their marginal distribution. The distributions stay (nearly)
+the same, but individual synthetic records move away from the real ones.
+
+```{r}
+near <- generate(fit, seed = 2)
+far <- generate(fit, perturb = perturbation(noise = 0.6, swap = 0.3), seed = 2)
+c(near = dcr(Boston, near, seed = 1)$ratio, far = dcr(Boston, far, seed = 1)$ratio)
+round(rbind(real = sapply(Boston[c("medv", "lstat", "rm")], sd),
+            near = sapply(near[c("medv", "lstat", "rm")], sd),
+            far = sapply(far[c("medv", "lstat", "rm")], sd)), 2)
+```
+
+```{r}
+plot_dcr(dcr(Boston, far, seed = 1))
+```
+
+## Distribution level: scenarios
+
+`shift`, `scale`, `temperature` and `dependence` change the distributions on
+purpose. They accept a single number for all eligible variables or a named
+vector for specific variables. Here is a scenario with higher crime rates,
+more variable room counts and a stronger dependence between variables:
+
+```{r}
+scenario <- perturbation(shift = c(crim = 1), scale = c(rm = 1.5), dependence = 1.3)
+scenario
+stress <- generate(fit, perturb = scenario, seed = 3)
+```
+
+```{r, fig.height = 3.5}
+plot_marginals(Boston, stress, vars = c("crim", "rm", "medv"))
+```
+
+By default (`bounds = "sign"`), variables that are never negative in the
+real data, such as `crim`, stay non-negative; use `bounds = "observed"` to
+stay within the observed range, or `"none"` for no restriction.
+
+For categorical variables, `temperature > 1` makes the categories more
+equally frequent and `temperature < 1` concentrates the data on the most
+frequent ones:
+
+```{r}
+fit_i <- fit_synthesizer(iris[c(1:50, 51:70, 101:105), ])   # unbalanced species
+round(rbind(
+  real = prop.table(table(iris[c(1:50, 51:70, 101:105), "Species"])),
+  `T = 1` = prop.table(table(generate(fit_i, n = 5000, seed = 1)$Species)),
+  `T = 3` = prop.table(table(generate(fit_i, n = 5000, seed = 1,
+                                      perturb = perturbation(temperature = 3))$Species))
+), 2)
+```
+
+`closeness` and `perturb` can be used together: their record-level effects
+add up, so `generate(fit, closeness = 0.8, perturb = scenario)` produces a
+smoothed version of the scenario.
+
+## Hitting a target distance
+
+Rather than guessing a value of `closeness`, state the distance you want.
+`calibrate_closeness()` evaluates a metric over a grid of closeness values
+(with the same random numbers each time), refines the solution by
+bisection and finishes with a linear interpolation step. Here we ask for synthetic data that a classifier can
+distinguish from the real data with an AUC of 0.85:
+
+```{r}
+cal <- calibrate_closeness(fit, Boston, target = 0.85, metric = "auc",
+                           grid = seq(0, 1, by = 0.1), refine = 3)
+cal
+plot(cal)
+```
+
+The metric is itself an estimate, so a check with a fresh seed gives a
+value close to, but not exactly at, the target:
+
+```{r}
+syn <- generate(fit, closeness = cal$closeness, seed = 99)
+discriminator_auc(Boston, syn, seed = 5)
+```
+
+Other targets are the DCR ratio (`metric = "dcr"`, useful as a disclosure
+risk threshold), the pMSE ratio and the mean marginal distance. Directional
+perturbations can be kept fixed while calibrating:
+`calibrate_closeness(fit, Boston, 0.9, perturb = scenario)`.
+
+## Use with augmentation
+
+Lower closeness yields more diverse synthetic training data for machine
+learning. `augment_data()` passes `closeness` and `perturb` on:
+
+```{r}
+big <- augment_data(Boston[1:60, ], n = 1000, closeness = 0.8, seed = 1)
+dim(big)
+```
+
+Whether more diversity helps a given model is an empirical question; tune
+`closeness` by cross-validation on the training data as shown in
+`vignette("regularisation")`.

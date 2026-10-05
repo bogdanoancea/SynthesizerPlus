@@ -1,0 +1,202 @@
+---
+title: "Getting started with SynthesizerPlus"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+vignette: >
+  %\VignetteIndexEntry{Getting started with SynthesizerPlus}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7,
+                      fig.height = 4.2, dpi = 72, out.width = "100%")
+```
+
+**SynthesizerPlus** generates synthetic data that mimic a real data set: the
+synthetic records follow the same marginal distributions and the same
+dependence structure, but they are new records. This vignette introduces the
+modelling approach and the main functions. Other vignettes cover
+[evaluation](evaluating-synthetic-data.html),
+[time series](time-series.html),
+[multivariate distributions](multivariate-distributions.html) and
+[file formats](file-formats.html).
+
+```{r}
+library(SynthesizerPlus)
+```
+
+## The model in one paragraph
+
+By Sklar's theorem every multivariate distribution can be written as a
+*copula* (the dependence structure) applied to the *marginal* distributions.
+SynthesizerPlus estimates
+
+1. one **marginal model per column** — the empirical quantile function for
+   continuous variables (linearly or monotonically spline-interpolated between
+   order statistics), and the empirical probability table for discrete,
+   categorical, ordinal and logical variables;
+2. a **copula** — Gaussian (default), Student-*t* or independence — from the
+   rank correlations of the data. Discrete and categorical columns enter the
+   copula through the *distributional transform*, so they are part of the
+   dependence structure instead of being sampled independently;
+3. a **missing-data model** — each column with missing values gets a
+   missingness indicator that is also part of the copula, so both the
+   missingness rate and its relation to other variables are reproduced.
+
+Generation reverses the steps: draw from the copula, push each uniform
+through the corresponding quantile function, and restore the original column
+classes (`factor` levels, `Date`, `POSIXct` with time zone, `integer`, ...).
+
+## Fit once, generate many times
+
+```{r}
+fit <- fit_synthesizer(iris)
+fit
+syn <- generate(fit, n = 500, seed = 1)
+head(syn)
+```
+
+`generate()` can be called as often as needed; `n` may be larger or smaller
+than the training data. The `seed` argument makes the output reproducible
+*without* changing the random-number state of your session.
+
+For a quick one-off, `synthesize()` fits and generates in one call, and can
+write the result straight to a file:
+
+```{r}
+syn2 <- synthesize(mtcars, n = 100, seed = 2)
+str(syn2[, 1:5])
+```
+
+## Supported column types
+
+```{r}
+set.seed(10)
+n <- 200
+people <- data.frame(
+  age = as.integer(round(runif(n, 18, 80))),
+  income = round(rlnorm(n, 10, 0.6)),
+  sector = factor(sample(c("agri", "industry", "services"), n, TRUE,
+                         prob = c(0.1, 0.3, 0.6))),
+  education = factor(sample(c("primary", "secondary", "tertiary"), n, TRUE),
+                     levels = c("primary", "secondary", "tertiary"), ordered = TRUE),
+  region = sample(c("North", "South", "East", "West"), n, TRUE),
+  employed = runif(n) < 0.7,
+  survey_date = as.Date("2024-01-01") + sample(0:365, n, TRUE),
+  stringsAsFactors = FALSE
+)
+people$income[sample(n, 20)] <- NA
+
+fit_p <- fit_synthesizer(people)
+summary(fit_p)
+str(generate(fit_p, n = 5, seed = 3))
+```
+
+Numeric columns with at most `discrete_threshold` (default 20) distinct
+values are modelled as discrete, so a variable such as the number of
+cylinders only takes observed values. Continuous values are always within the
+observed range.
+
+## Missing values
+
+The default `missing = "joint"` reproduces both the share of missing values
+and how missingness relates to other variables. In `airquality`, ozone values
+are missing more often in June:
+
+```{r}
+fit_aq <- fit_synthesizer(airquality)
+syn_aq <- generate(fit_aq, n = 5000, seed = 4)
+rbind(real = tapply(is.na(airquality$Ozone), airquality$Month, mean),
+      synthetic = tapply(is.na(syn_aq$Ozone), syn_aq$Month, mean))
+```
+
+Use `missing = "independent"` to reproduce only the rates, or `"drop"` to
+generate complete data.
+
+## Stratified models
+
+A single Gaussian copula cannot represent every kind of dependence. Strong,
+non-monotone relations with a categorical variable — such as the species
+clusters in `iris` — are attenuated. Fitting separate models within strata
+solves this:
+
+```{r}
+syn_pooled <- generate(fit_synthesizer(iris), seed = 1)
+syn_strat <- generate(fit_synthesizer(iris, by = "Species"), seed = 1)
+quality <- rbind(
+  pooled = summary(compare_synthetic(iris, syn_pooled, seed = 1))$value[c(3, 5)],
+  stratified = summary(compare_synthetic(iris, syn_strat, seed = 1))$value[c(3, 5)]
+)
+colnames(quality) <- c("mean |assoc. diff|", "discriminator AUC")
+round(quality, 3)
+```
+
+```{r, fig.height = 5}
+plot_pairs(iris, syn_strat, vars = c("Sepal.Length", "Petal.Length", "Petal.Width"))
+```
+
+Strata smaller than `min_stratum_size` (default 20) fall back to a pooled
+model, which avoids over-fitting (and reproducing) tiny groups. Stratum
+sizes in the synthetic data are drawn from a multinomial distribution, or set
+proportionally with `generate(..., stratum_sizes = "proportional")`.
+
+## Controlling the dependence
+
+`dependence` shrinks the copula correlation matrix towards the identity
+without changing any marginal distribution — useful for sensitivity
+analyses or to reduce disclosure risk:
+
+```{r}
+fit_mt <- fit_synthesizer(mtcars)
+sapply(c(0, 0.5, 1), function(l) {
+  s <- generate(fit_mt, n = 2000, dependence = l, seed = 5)
+  cor(s$mpg, s$wt, method = "spearman")
+})
+cor(mtcars$mpg, mtcars$wt, method = "spearman")
+```
+
+## Heavy tails: the *t* copula
+
+For data with joint extremes (e.g. financial returns) the Gaussian copula
+underestimates the probability of simultaneous large values. The *t* copula
+estimates its degrees of freedom by profile likelihood:
+
+```{r}
+r <- as.data.frame(diff(log(EuStockMarkets)))
+fit_t <- fit_synthesizer(r, copula = "t")
+fit_t
+```
+
+## Identifiers, model size and privacy
+
+* Columns listed in `id_cols` are not modelled; synthetic records get fresh
+  identifiers.
+* By default the continuous marginals store all observed values.
+  `knots = 200`, say, compresses each quantile function to 200 quantiles:
+  the model gets smaller and no longer contains the original values.
+
+```{r}
+d <- data.frame(id = sprintf("R%04d", 1:1000), x = rexp(1000))
+fit_k <- fit_synthesizer(d, id_cols = "id", knots = 200)
+head(generate(fit_k, n = 3, seed = 1))
+format(object.size(fit_k), units = "Kb")
+```
+
+## Multiple synthetic data sets
+
+To reflect the uncertainty of the synthesis (for inference with multiple
+synthetic data sets), draw several independent copies with `simulate()`:
+
+```{r}
+sims <- simulate(fit_mt, nsim = 5, seed = 1)
+sapply(sims, function(s) coef(lm(mpg ~ wt, data = s))[["wt"]])
+```
+
+## Where next
+
+* `compare_synthetic()` and the plotting functions assess the quality of the
+  synthetic data — see `vignette("evaluating-synthetic-data")`.
+* `generate_to_file()` writes very large synthetic data sets in chunks to
+  CSV, Parquet, HDF5 and other formats — see `vignette("file-formats")`.
