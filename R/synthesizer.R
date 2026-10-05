@@ -225,7 +225,9 @@ fit_synthesizer.default <- function(data, ...) {
   codes <- lapply(cols, function(nm) {
     vals <- lapply(dfs, function(d) {
       v <- d[[nm]]
-      if (is.factor(v)) as.character(v) else v
+      if (is.factor(v)) v <- as.character(v)
+      if (is.double(v)) v[is.nan(v)] <- NA     # NaN and NA are both missing
+      v
     })
     all <- do.call(c, unname(lapply(vals, function(v) if (inherits(v, c("Date", "POSIXct"))) as.numeric(v) else v)))
     match(all, unique(all))

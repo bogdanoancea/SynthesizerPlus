@@ -388,7 +388,9 @@ pmse <- function(real, synthetic, vars = NULL, max_rows = 10000L, seed = NULL,
 #' arise when synthetic records are copies of real ones. A held-out record
 #' then has an identical twin with the opposite label in the training folds,
 #' and the classifier systematically predicts the wrong class. Check such
-#' cases with [dcr()].
+#' cases with [dcr()]. The AUC is therefore deliberately not folded into a
+#' symmetric measure such as \eqn{\max(AUC, 1 - AUC)}: that would report
+#' copies of the real data as easily distinguishable.
 #'
 #' The default `model = "quadratic"` adds squares and pairwise products of
 #' the numeric variables (ridge-penalised), so that differences in spread and
@@ -519,6 +521,7 @@ ci_overlap <- function(real, synthetic, formula, family = stats::gaussian(),
   nB <- length(B[[1L]]$x)
   p <- length(A)
   out <- numeric(nA)
+  compared <- numeric(nA)
   for (s in seq(1L, nA, by = block)) {
     idx <- s:min(nA, s + block - 1L)
     D <- matrix(0, length(idx), nB)
@@ -544,10 +547,20 @@ ci_overlap <- function(real, synthetic, formula, family = stats::gaussian(),
     D <- D / W
     D[W == 0] <- NA_real_
     if (exclude_self) D[cbind(seq_along(idx), idx)] <- Inf
-    out[idx] <- apply(D, 1L, function(r) {
-      if (all(is.na(r))) NA_real_ else min(r, na.rm = TRUE)
-    })
+    for (i in seq_along(idx)) {
+      r <- D[i, ]
+      if (all(is.na(r))) {
+        out[idx[i]] <- NA_real_
+        compared[idx[i]] <- 0
+      } else {
+        m <- min(r, na.rm = TRUE)
+        out[idx[i]] <- m
+        # among equally close records, report the one compared on most variables
+        compared[idx[i]] <- max(W[i, which(r == m)]) / p
+      }
+    }
   }
+  attr(out, "compared") <- compared
   out
 }
 
@@ -582,8 +595,14 @@ ci_overlap <- function(real, synthetic, formula, family = stats::gaussian(),
 #'   `"exclude"` (standard Gower); see Details.
 #' @return A list with the distance vectors `synthetic` and `real`,
 #'   their `quantiles`, the share of synthetic records that are exact copies
-#'   of a real record (`exact_match_rate`), the same share within the real
-#'   data (`real_duplicate_rate`) and `ratio`, the median synthetic distance
+#'   of a real record on *all* variables (`exact_match_rate`), the share at
+#'   distance zero on the variables compared (`zero_distance_rate`; with
+#'   `na = "exclude"` this can include records that agree with a real record
+#'   only on the few variables observed in both), the average share of
+#'   variables on which the nearest real record was compared
+#'   (`compared_share`; always 1 with `na = "category"`), the share of exact
+#'   duplicates within the real data (`real_duplicate_rate`) and `ratio`,
+#'   the median synthetic distance
 #'   divided by the median real-to-real distance (values well below 1 are a
 #'   warning sign), and `close_share`, the share of synthetic records that
 #'   are closer to a real record than `close_quantile` (5\%) of real records
@@ -616,8 +635,10 @@ dcr <- function(real, synthetic, vars = NULL, max_rows = 2000L, seed = NULL,
     S <- .gower_prep(s, p$real)
     d_syn <- .min_gower(S, R, na = na)
     d_real <- .min_gower(R, R, exclude_self = TRUE, na = na)
-    d_syn <- d_syn[!is.na(d_syn)]
-    d_real <- d_real[!is.na(d_real)]
+    cmp_syn <- attr(d_syn, "compared")[!is.na(d_syn)]
+    cmp_real <- attr(d_real, "compared")[!is.na(d_real)]
+    d_syn <- as.numeric(d_syn[!is.na(d_syn)])
+    d_real <- as.numeric(d_real[!is.na(d_real)])
     if (!length(d_syn) || !length(d_real)) {
       stop("No pair of records has a variable observed in both.", call. = FALSE)
     }
@@ -627,9 +648,11 @@ dcr <- function(real, synthetic, vars = NULL, max_rows = 2000L, seed = NULL,
     colnames(q) <- paste0("q", probs * 100)
     med_r <- stats::median(d_real)
     list(synthetic = d_syn, real = d_real, quantiles = q,
-         exact_match_rate = mean(d_syn < 1e-12),
+         exact_match_rate = mean(d_syn < 1e-12 & cmp_syn == 1),
+         zero_distance_rate = mean(d_syn < 1e-12),
+         compared_share = mean(cmp_syn),
          close_share = mean(d_syn < stats::quantile(d_real, close_quantile, names = FALSE)),
-         real_duplicate_rate = mean(d_real < 1e-12),
+         real_duplicate_rate = mean(d_real < 1e-12 & cmp_real == 1),
          ratio = if (med_r > 0) stats::median(d_syn) / med_r else NA_real_)
   })
 }
@@ -712,6 +735,10 @@ print.sp_comparison <- function(x, digits = 3, ...) {
   if (!is.null(x$utility)) {
     cat(sprintf("Utility: pMSE = %.*g (ratio to null = %.*f), discriminator AUC = %.*f\n",
                 digits, x$utility$pmse, 2, x$utility$pmse_ratio, digits, x$utility$auc))
+    if (is.finite(x$utility$auc) && x$utility$auc < 0.4) {
+      cat("  Note: an AUC well below 0.5 usually means that synthetic records copy real\n",
+          "  ones (see ?discriminator_auc); check the privacy metrics.\n", sep = "")
+    }
   }
   if (!is.null(x$privacy)) {
     cat(sprintf("Privacy: exact copies = %s, median DCR ratio (synthetic / real) = %.*f\n",

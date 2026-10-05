@@ -32,8 +32,14 @@ a synthetic record as "too close" to a real record (see \code{close_share}).}
 \value{
 A list with the distance vectors \code{synthetic} and \code{real},
 their \code{quantiles}, the share of synthetic records that are exact copies
-of a real record (\code{exact_match_rate}), the same share within the real
-data (\code{real_duplicate_rate}) and \code{ratio}, the median synthetic distance
+of a real record on \emph{all} variables (\code{exact_match_rate}), the share at
+distance zero on the variables compared (\code{zero_distance_rate}; with
+\code{na = "exclude"} this can include records that agree with a real record
+only on the few variables observed in both), the average share of
+variables on which the nearest real record was compared
+(\code{compared_share}; always 1 with \code{na = "category"}), the share of exact
+duplicates within the real data (\code{real_duplicate_rate}) and \code{ratio},
+the median synthetic distance
 divided by the median real-to-real distance (values well below 1 are a
 warning sign), and \code{close_share}, the share of synthetic records that
 are closer to a real record than \code{close_quantile} (5\\%) of real records

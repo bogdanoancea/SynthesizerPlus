@@ -69,9 +69,11 @@ test_that("Gower distance: missingness as a category or standard Gower", {
                                  SynthesizerPlus:::.gower_prep(real, real), na = na)
   }
   # category: vs row 2 -> a match, b mismatch, c 0.1/8, d e match -> 1.0125 / 5
-  expect_equal(g("category"), (0 + 1 + 0.1 / 8 + 0 + 0) / 5)
-  # standard Gower: only c is observed in both -> 0.1 / 8
-  expect_equal(g("exclude"), 0.1 / 8)
+  expect_equal(g("category"), (0 + 1 + 0.1 / 8 + 0 + 0) / 5, ignore_attr = TRUE)
+  expect_equal(attr(g("category"), "compared"), 1)
+  # standard Gower: only c is observed in both -> 0.1 / 8, on 1 of 5 variables
+  expect_equal(g("exclude"), 0.1 / 8, ignore_attr = TRUE)
+  expect_equal(attr(g("exclude"), "compared"), 1 / 5)
   # no variable observed in both -> no distance
   none <- SynthesizerPlus:::.min_gower(
     SynthesizerPlus:::.gower_prep(data.frame(a = NA_real_, b = 1), data.frame(a = 1, b = NA_real_)),
@@ -154,4 +156,97 @@ test_that("date-time strings are read in the right time zone", {
   on.exit(unlink(f))
   write_data(d, f)
   expect_equal(read_data(f, template = d)$t, d$t)
+})
+
+# ---- issues from the second review (0.2.1) -------------------------------------
+
+test_that("r_dirichlet() rejects non-finite or non-positive alpha", {
+  for (a in list(c(1, NA), c(1, NaN), c(1, Inf), c(1, 0), c(1, -1), 1, "a")) {
+    expect_error(r_dirichlet(10, a), "finite positive", info = format(a))
+  }
+})
+
+test_that("disclosure_risk() requires a finite tolerance", {
+  x <- data.frame(k = 1:3, y = 1:3)
+  for (tol in list(NA_real_, Inf, -1, c(0.1, 0.2), "0.1")) {
+    expect_error(disclosure_risk(x, x, keys = "k", target = "y", tolerance = tol),
+                 "tolerance", info = format(tol))
+  }
+  expect_s3_class(disclosure_risk(x, x, keys = "k", target = "y", tolerance = 0), "sp_disclosure")
+})
+
+test_that("seeds must be finite and in the integer range", {
+  for (s in list(Inf, -Inf, NaN, 1e12, c(1, 2), "1")) {
+    expect_error(r_copula(10, seed = s), "seed", info = format(s))
+  }
+  expect_error(generate(fit_synthesizer(iris), seed = Inf), "seed")
+  expect_silent(r_copula(2, seed = -.Machine$integer.max))
+})
+
+test_that("make_corr() validates rho", {
+  for (type in c("exchangeable", "ar1")) {
+    for (r in list(NA_real_, NaN, Inf, "a", numeric(0))) {
+      expect_error(make_corr(3, type, r), "rho", info = paste(type, format(r)))
+    }
+  }
+  expect_error(make_corr(3, "toeplitz", c(NA, 0)), "rho")
+  expect_equal(dim(make_corr(3, "random", rho = NA)), c(3L, 3L))   # rho unused for random
+})
+
+test_that("all mixture components are validated before sampling", {
+  bad_sigma <- matrix(c(1, 2, 2, 1), 2)
+  expect_error(r_mvmixture(10, c(1, 0), list(c(0, 0), c(0, 0)), list(diag(2), bad_sigma)),
+               "Component 2.*semi-definite")
+  expect_error(r_mvmixture(10, c(1, 0), list(c(0, 0), c("a", "b")), list(diag(2), diag(2))),
+               "Component 2.*finite")
+  expect_error(r_mvmixture(10, c(1, 1), list(c(0, 0), c(Inf, 0)), list(diag(2), diag(2))),
+               "Component 2.*finite")
+  expect_error(r_mvmixture(10, c(1, 1), list(c(0, 0), c(0, 0)),
+                           list(diag(2), matrix(c(1, NA, NA, 1), 2))), "Component 2.*finite")
+  expect_error(r_mvmixture(10, c(1, 1), list(c(0, 0), c(0, 0)),
+                           list(diag(2), matrix(c(1, 0.5, 0.2, 1), 2))), "Component 2.*symmetric")
+})
+
+test_that("row keys handle special values consistently", {
+  k <- SynthesizerPlus:::.stratum_key
+  num <- k(data.frame(v = c(NA, NaN, Inf, -Inf, -0, 0, 1)))
+  expect_equal(num[1], num[2])              # NA and NaN are both missing
+  expect_false(num[3] == num[4])            # Inf and -Inf differ
+  expect_equal(num[5], num[6])              # -0 equals 0
+  expect_false(num[1] == num[6])
+  chr <- k(data.frame(v = c(NA_character_, "NA", "<NA>", "")))
+  expect_length(unique(chr), 4L)
+  int <- k(data.frame(v = c(NA_integer_, 0L, NA_integer_)))
+  expect_equal(int[1], int[3])
+  lgl <- k(data.frame(v = c(NA, TRUE, FALSE, NA)))
+  expect_equal(lgl[1], lgl[4])
+  expect_length(unique(lgl), 3L)
+  dt <- k(data.frame(v = as.Date(c(NA, "2020-01-01", "2020-01-01"))))
+  expect_equal(dt[2], dt[3])
+  # consistency across data frames (real vs synthetic) for the same values
+  kk <- SynthesizerPlus:::.row_keys(data.frame(v = c(NaN, 1)), data.frame(v = c(NA, 1)))
+  expect_equal(kk[[1]], kk[[2]])
+})
+
+test_that("exact matches under na = 'exclude' require all variables", {
+  real <- data.frame(a = c(1, 2), b = c(5, 6), c = c(7, 8))
+  partial <- data.frame(a = c(1, NA), b = c(NA, NA), c = c(NA, 8))   # 1 of 3 variables each
+  d <- dcr(real, partial, na = "exclude")
+  expect_equal(d$zero_distance_rate, 1)
+  expect_equal(d$exact_match_rate, 0)
+  expect_equal(d$compared_share, 1 / 3)
+  full <- dcr(real, real[2:1, ], na = "exclude")
+  expect_equal(full$exact_match_rate, 1)
+  expect_equal(full$compared_share, 1)
+  cat_d <- dcr(real, partial, na = "category")
+  expect_equal(cat_d$compared_share, 1)
+  expect_equal(cat_d$exact_match_rate, cat_d$zero_distance_rate)
+})
+
+test_that("comparison output flags an AUC well below 0.5", {
+  cmp <- compare_synthetic(iris, iris[sample(150), ], metrics = "utility", seed = 2)
+  expect_lt(cmp$utility$auc, 0.4)
+  expect_output(print(cmp), "copy real")
+  ok <- compare_synthetic(iris, synthesize(iris, seed = 1), metrics = "utility", seed = 2)
+  expect_false(any(grepl("copy real", capture.output(print(ok)))))
 })

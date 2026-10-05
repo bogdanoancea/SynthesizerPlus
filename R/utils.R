@@ -8,8 +8,9 @@
   if (is.null(seed)) {
     return(force(code))
   }
-  if (!is.numeric(seed) || length(seed) != 1L || is.na(seed)) {
-    stop("'seed' must be NULL or a single number.", call. = FALSE)
+  if (!is.numeric(seed) || length(seed) != 1L || !is.finite(seed) ||
+      abs(seed) > .Machine$integer.max) {
+    stop("'seed' must be NULL or a single finite number within the integer range.", call. = FALSE)
   }
   env <- globalenv()
   had_seed <- exists(".Random.seed", envir = env, inherits = FALSE)

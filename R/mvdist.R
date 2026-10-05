@@ -18,6 +18,10 @@ make_corr <- function(d, type = c("exchangeable", "ar1", "toeplitz", "random", "
                       rho = 0.5, names = NULL) {
   d <- .check_count(d, "d", allow_zero = FALSE)
   type <- match.arg(type)
+  if (type %in% c("exchangeable", "ar1", "toeplitz") &&
+      (!is.numeric(rho) || !length(rho) || any(!is.finite(rho)))) {
+    stop("'rho' must contain finite numbers.", call. = FALSE)
+  }
   R <- switch(type,
     identity = diag(d),
     exchangeable = {
@@ -206,8 +210,8 @@ r_mvskewnorm <- function(n, xi = NULL, omega, alpha, seed = NULL) {
 #' @export
 r_dirichlet <- function(n, alpha, seed = NULL) {
   n <- .check_count(n)
-  if (!is.numeric(alpha) || any(alpha <= 0) || length(alpha) < 2L) {
-    stop("'alpha' must be a vector of at least 2 positive numbers.", call. = FALSE)
+  if (!is.numeric(alpha) || length(alpha) < 2L || any(!is.finite(alpha)) || any(alpha <= 0)) {
+    stop("'alpha' must contain at least 2 finite positive numbers.", call. = FALSE)
   }
   d <- length(alpha)
   g <- .with_seed(seed, matrix(stats::rgamma(n * d, shape = rep(alpha, each = n)), n, d))
@@ -232,12 +236,23 @@ r_mvmixture <- function(n, weights, means, sigmas, return_component = FALSE,
     stop("'weights' must be finite, non-negative and not all zero.", call. = FALSE)
   }
   d <- length(means[[1L]])
+  # every component is validated, whether or not it will be sampled
   for (j in seq_len(k)) {
+    mj <- means[[j]]
     sj <- as.matrix(sigmas[[j]])
-    if (length(means[[j]]) != d || !identical(dim(sj), c(d, d))) {
+    if (length(mj) != d || !identical(dim(sj), c(d, d))) {
       stop(sprintf("Component %d: all means must have length %d and all sigmas must be %d x %d.",
                    j, d, d, d), call. = FALSE)
     }
+    if (!is.numeric(mj) || any(!is.finite(mj))) {
+      stop(sprintf("Component %d: the mean must contain finite numbers.", j), call. = FALSE)
+    }
+    if (!is.numeric(sj) || any(!is.finite(sj))) {
+      stop(sprintf("Component %d: the covariance matrix must contain finite numbers.", j), call. = FALSE)
+    }
+    tryCatch(.mat_sqrt(sj), error = function(e) {
+      stop(sprintf("Component %d: %s", j, conditionMessage(e)), call. = FALSE)
+    })
   }
   .with_seed(seed, {
     comp <- sample.int(k, n, replace = TRUE, prob = weights / sum(weights))

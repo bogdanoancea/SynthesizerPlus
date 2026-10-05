@@ -1,3 +1,25 @@
+# SynthesizerPlus 0.2.2
+
+Fixes from a second code review.
+
+* Argument validation: `r_dirichlet()` requires finite positive `alpha`;
+  `make_corr()` requires finite numeric `rho`; `disclosure_risk()` requires a
+  finite non-negative `tolerance`; `seed` arguments must be finite and in
+  the integer range.
+* `r_mvmixture()` validates every component (finite means, finite and
+  positive semi-definite covariance matrices) before sampling, so an
+  invalid component is reported even when its weight is zero.
+* Row keys treat `NaN` like `NA` (both are missing values).
+* `dcr()`: `exact_match_rate` now counts only records identical to a real
+  record on *all* variables. New `zero_distance_rate` (distance zero on the
+  variables compared) and `compared_share` (share of variables on which the
+  nearest real record was compared) make the meaning explicit under
+  `na = "exclude"`. `real_duplicate_rate` is defined in the same way.
+* `compare_synthetic()` flags a discriminator AUC well below 0.5, which
+  indicates synthetic records that copy real ones. The AUC is deliberately
+  not converted to a symmetric measure such as `max(AUC, 1 - AUC)`, which
+  would report copies of the real data as easy to distinguish.
+
 # SynthesizerPlus 0.2.1
 
 Fixes from an external code review.

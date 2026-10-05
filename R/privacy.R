@@ -80,8 +80,8 @@ disclosure_risk <- function(real, synthetic, keys, target = NULL, ignore = NULL,
   keep <- setdiff(names(real), ignore)
   real <- real[keep]
   synthetic <- synthetic[keep]
-  if (!is.numeric(tolerance) || length(tolerance) != 1L || tolerance < 0) {
-    stop("'tolerance' must be a non-negative number.", call. = FALSE)
+  if (!is.numeric(tolerance) || length(tolerance) != 1L || !is.finite(tolerance) || tolerance < 0) {
+    stop("'tolerance' must be a single finite non-negative number.", call. = FALSE)
   }
 
   kk <- .row_keys(real[keys], synthetic[keys])

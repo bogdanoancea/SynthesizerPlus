@@ -44,7 +44,9 @@ Values clearly \emph{below} 0.5 are a warning sign of a different kind: they
 arise when synthetic records are copies of real ones. A held-out record
 then has an identical twin with the opposite label in the training folds,
 and the classifier systematically predicts the wrong class. Check such
-cases with \code{\link[=dcr]{dcr()}}.
+cases with \code{\link[=dcr]{dcr()}}. The AUC is therefore deliberately not folded into a
+symmetric measure such as \eqn{\max(AUC, 1 - AUC)}: that would report
+copies of the real data as easily distinguishable.
 
 The default \code{model = "quadratic"} adds squares and pairwise products of
 the numeric variables (ridge-penalised), so that differences in spread and
