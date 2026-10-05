@@ -104,8 +104,12 @@ Use \code{\link[=generate]{generate()}} to draw synthetic data from the fitted m
 \emph{Latent correlations.} For the Gaussian copula the latent correlation
 matrix is the Pearson correlation of the normal scores
 \eqn{\Phi^{-1}(U)}; for the t copula it is obtained by inverting Kendall's
-tau, \eqn{\rho = \sin(\pi\tau/2)} (on a random subsample of at most
-2000 rows). With incomplete data both are computed from \strong{pairwise
+tau, \eqn{\rho = \sin(\pi\tau/2)}. As Kendall's tau is quadratic in
+the sample size, it is computed on a random subsample of 2000 rows; a pair
+that the subsample leaves with fewer than \eqn{\min(n_{ij}, 500)} jointly
+observed rows is re-estimated from up to 2000 of its own \eqn{n_{ij}}
+joint rows, so every pair with \eqn{n_{ij} \ge 3} is estimated whatever the
+subsample. With incomplete data both are computed from \strong{pairwise
 complete observations}. Pairwise estimates based on different subsets of
 rows need not form a coherent joint estimate, and the resulting matrix
 need not be positive definite; it is then projected onto the set of
@@ -123,8 +127,13 @@ maximum-determinant positive-definite completion of the identified
 entries (Dempster, 1972), which keeps every identified correlation and
 makes the pair conditionally independent given the other variables. If
 the identified entries cannot be completed, the unknown entries fall back
-to 0. A warning reports how many pairs were affected, and
-\code{copula_correlation(fit, what = "n_pair")} gives the pairwise counts.
+to 0. In either case the matrix may then still be modified by the
+positive-definiteness repair. A warning reports how many pairs were
+affected and how they were filled; \code{copula_correlation(fit, what = "n_pair")} gives the pairwise counts, and the fitted copula records the
+method (\code{completion}: \code{"none"}, \code{"maxdet"} or \code{"zero_fallback"}) and the
+largest change made by the repair (\code{pd_adjustment}), both shown by
+\code{summary()}. Pair counts and identification always refer to the full
+data.
 
 \emph{t-copula degrees of freedom.} With the correlation matrix held fixed,
 \code{df} is chosen by profile likelihood over the grid

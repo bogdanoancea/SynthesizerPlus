@@ -5,11 +5,12 @@
 # Pairs observed together in fewer than `min_pair_obs` rows (or whose
 # correlation is not finite) are *unidentified*: their correlation is filled
 # by the maximum-determinant completion of the identified entries (falling
-# back to 0 if that fails). The counts are kept in `n_pair`.
+# back to 0 if that fails). The counts are kept in `n_pair`; they always refer
+# to the full data, never to a computational subsample.
 .fit_copula <- function(U, family = c("gaussian", "t", "independence"),
                         pd_method = c("auto", "higham", "eigen", "none"),
                         df_grid = c(2, 3, 4, 5, 6, 8, 10, 15, 20, 30, 50, 100),
-                        max_rows = 5000L, min_pair_obs = 3L) {
+                        max_rows = 5000L, min_pair_obs = 3L, tau_rows = 2000L) {
   family <- match.arg(family)
   pd_method <- match.arg(pd_method)
   d <- ncol(U)
@@ -22,31 +23,37 @@
     storage.mode(np) <- "integer"
     dimnames(np) <- list(nm, nm)
     return(list(family = "independence", R = R, df = Inf, df_estimated = NA,
-                chol = R, n_pair = np, unidentified = 0L))
+                chol = R, n_pair = np, unidentified = 0L, completion = "none",
+                pd_adjustment = 0))
   }
 
+  # identification is decided on the full data: number of rows in which
+  # both variables of each pair are observed
+  obs <- !is.na(U)
+  np <- crossprod(obs + 0)
+  storage.mode(np) <- "integer"
+  dimnames(np) <- list(nm, nm)
+
   if (family == "gaussian") {
-    Ue <- U
     Z <- stats::qnorm(U)
     R <- suppressWarnings(stats::cor(Z, use = "pairwise.complete.obs"))
   } else {
-    # Kendall's tau inversion is robust for the t copula: rho = sin(pi/2 tau)
-    Ue <- if (nrow(U) > 2000L) U[sample.int(nrow(U), 2000L), , drop = FALSE] else U
-    tau <- suppressWarnings(stats::cor(Ue, method = "kendall",
-                                       use = "pairwise.complete.obs"))
-    R <- sin(pi / 2 * tau)
+    R <- .pairwise_kendall_corr(U, obs, np, tau_rows = tau_rows)
   }
-  # number of rows on which each pairwise estimate is based
-  np <- crossprod(!is.na(Ue) + 0)
-  storage.mode(np) <- "integer"
-  dimnames(np) <- list(nm, nm)
   unid <- (np < min_pair_obs) | !is.finite(R)
   diag(unid) <- FALSE
   R[unid] <- NA
   diag(R) <- 1
   R <- (R + t(R)) / 2
-  if (any(unid)) R <- .complete_corr(R, unid)
+  completion <- "none"
+  if (any(unid)) {
+    cmp <- .complete_corr(R, unid)
+    R <- cmp$R
+    completion <- cmp$method
+  }
+  R_before <- R
   R <- .make_pd(R, method = pd_method)
+  pd_adjustment <- max(abs(R - R_before))
   dimnames(R) <- list(nm, nm)
 
   df <- Inf
@@ -61,9 +68,70 @@
          "perfectly dependent). Use pd_method = \"auto\" to repair it.", call. = FALSE)
   })
   list(family = family, R = R, df = df, df_estimated = df_estimated, chol = ch,
-       n_pair = np, unidentified = as.integer(sum(unid) / 2))
+       n_pair = np, unidentified = as.integer(sum(unid) / 2),
+       completion = completion, pd_adjustment = pd_adjustment)
 }
 
+# Latent correlations of a t copula by inverting Kendall's tau,
+# rho = sin(pi/2 tau). Kendall's tau is O(n^2), so one common subsample of
+# `tau_rows` rows serves all pairs. A pair that the common subsample leaves
+# with fewer than min(n_pair, tau_min_rows) jointly observed rows (e.g. a
+# pair with sparse overlap) is re-estimated from up to `tau_rows` of its own
+# joint rows. Hence every identified pair (n_pair >= 3) is estimated, from at
+# least min(n_pair, tau_min_rows) rows, whatever the random subsample.
+.pairwise_kendall_corr <- function(U, obs, np, tau_rows = 2000L, tau_min_rows = 500L) {
+  n <- nrow(U)
+  rows <- if (n > tau_rows) sort(sample.int(n, tau_rows)) else seq_len(n)
+  tau <- .kendall_matrix(U[rows, , drop = FALSE])
+  if (n > tau_rows) {
+    np_sub <- crossprod(obs[rows, , drop = FALSE] + 0)
+    redo <- np_sub < pmin(np, tau_min_rows) & np > 0
+    redo[lower.tri(redo, diag = TRUE)] <- FALSE
+    ij <- which(redo, arr.ind = TRUE)
+    for (k in seq_len(nrow(ij))) {
+      i <- ij[k, 1L]
+      j <- ij[k, 2L]
+      jr <- which(obs[, i] & obs[, j])
+      if (length(jr) > tau_rows) jr <- jr[sample.int(length(jr), tau_rows)]
+      tau[i, j] <- tau[j, i] <- .kendall_matrix(U[jr, c(i, j), drop = FALSE])[1L, 2L]
+    }
+  }
+  sin(pi / 2 * tau)
+}
+
+# Pairwise-complete Kendall's tau of every pair of columns of X (which may
+# contain NA), for data without ties (pseudo-observations are continuous:
+# ranks with random tie-breaking or the randomised distributional
+# transform), where tau-a = tau-b:
+#   tau_ij = sum_{k != l} sgn(x_ki - x_li) sgn(x_kj - x_lj) / (n_ij (n_ij - 1)),
+# the sum running over rows where both columns are observed (a missing value
+# contributes a zero sign). The sum for all pairs is the cross-product of the
+# vectorised sign matrices, accumulated over blocks of rows so that memory
+# stays bounded; this replaces p^2 / 2 separate O(n^2) calls of
+# stats::cor(method = "kendall") with BLAS matrix products.
+.kendall_matrix <- function(X, block_cells = 4e6) {
+  X <- as.matrix(X)
+  n <- nrow(X)
+  p <- ncol(X)
+  obs <- !is.na(X)
+  X[!obs] <- 0
+  num <- matrix(0, p, p)
+  bs <- max(1L, as.integer(block_cells %/% max(1, n * p)))
+  for (start in seq.int(1L, n, by = bs)) {
+    B <- start:min(n, start + bs - 1L)
+    M <- vapply(seq_len(p), function(j) {
+      as.vector(sign(outer(X[B, j], X[, j], "-")) * outer(obs[B, j], obs[, j]))
+    }, numeric(length(B) * n))
+    if (!is.matrix(M)) M <- matrix(M, ncol = p)
+    num <- num + crossprod(M)
+  }
+  nij <- crossprod(obs + 0)
+  tau <- num / (nij * (nij - 1))
+  tau[nij < 2] <- NA
+  diag(tau) <- 1
+  dimnames(tau) <- list(colnames(X), colnames(X))
+  tau
+}
 # Maximum-determinant (maximum-entropy) positive-definite completion of a
 # correlation matrix whose entries flagged in `unid` are unknown: the
 # identified entries are kept and the unknown ones are chosen so that the
@@ -72,11 +140,12 @@
 # selection; algorithm 17.1 of Hastie, Tibshirani and Friedman 2009).
 # Falls back to 0 for the unknown entries if the identified entries are not
 # completable (inconsistent pairwise estimates) or the iteration fails.
+# Returns list(R, method) with method "maxdet" or "zero_fallback".
 .complete_corr <- function(R, unid, tol = 1e-10, max_iter = 500L) {
   zero_fill <- function() {
     R0 <- R
     R0[unid] <- 0
-    R0
+    list(R = R0, method = "zero_fallback")
   }
   p <- ncol(R)
   S <- R
@@ -105,7 +174,7 @@
   if (!isTRUE(ok)) return(zero_fill())
   W <- (W + t(W)) / 2
   diag(W) <- 1
-  W
+  list(R = W, method = "maxdet")
 }
 
 # Profile likelihood for the degrees of freedom of a t copula on a grid (R held

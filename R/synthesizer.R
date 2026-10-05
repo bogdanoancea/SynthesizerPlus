@@ -65,8 +65,12 @@
 #' *Latent correlations.* For the Gaussian copula the latent correlation
 #' matrix is the Pearson correlation of the normal scores
 #' \eqn{\Phi^{-1}(U)}; for the t copula it is obtained by inverting Kendall's
-#' tau, \eqn{\rho = \sin(\pi\tau/2)} (on a random subsample of at most
-#' 2000 rows). With incomplete data both are computed from **pairwise
+#' tau, \eqn{\rho = \sin(\pi\tau/2)}. As Kendall's tau is quadratic in
+#' the sample size, it is computed on a random subsample of 2000 rows; a pair
+#' that the subsample leaves with fewer than \eqn{\min(n_{ij}, 500)} jointly
+#' observed rows is re-estimated from up to 2000 of its own \eqn{n_{ij}}
+#' joint rows, so every pair with \eqn{n_{ij} \ge 3} is estimated whatever the
+#' subsample. With incomplete data both are computed from **pairwise
 #' complete observations**. Pairwise estimates based on different subsets of
 #' rows need not form a coherent joint estimate, and the resulting matrix
 #' need not be positive definite; it is then projected onto the set of
@@ -84,8 +88,14 @@
 #' entries (Dempster, 1972), which keeps every identified correlation and
 #' makes the pair conditionally independent given the other variables. If
 #' the identified entries cannot be completed, the unknown entries fall back
-#' to 0. A warning reports how many pairs were affected, and
-#' `copula_correlation(fit, what = "n_pair")` gives the pairwise counts.
+#' to 0. In either case the matrix may then still be modified by the
+#' positive-definiteness repair. A warning reports how many pairs were
+#' affected and how they were filled; `copula_correlation(fit, what =
+#' "n_pair")` gives the pairwise counts, and the fitted copula records the
+#' method (`completion`: `"none"`, `"maxdet"` or `"zero_fallback"`) and the
+#' largest change made by the repair (`pd_adjustment`), both shown by
+#' `summary()`. Pair counts and identification always refer to the full
+#' data.
 #'
 #' *t-copula degrees of freedom.* With the correlation matrix held fixed,
 #' `df` is chosen by profile likelihood over the grid
@@ -205,11 +215,21 @@ fit_synthesizer.data.frame <- function(data,
   # correlations of pairs never (or almost never) observed together
   n_unid <- vapply(mods, function(m) m$copula$unidentified %||% 0L, integer(1))
   if (any(n_unid > 0L)) {
+    meth <- vapply(mods[n_unid > 0L], function(m) m$copula$completion %||% "maxdet",
+                   character(1))
+    how <- if (all(meth == "maxdet")) {
+      "were filled by maximum-determinant completion"
+    } else if (all(meth == "zero_fallback")) {
+      "could not be completed consistently and were set to 0"
+    } else {
+      sprintf("were filled by maximum-determinant completion (set to 0 in %d model(s) where no completion exists)",
+              sum(meth == "zero_fallback"))
+    }
     warning(sprintf(paste0("%d pair(s) of variables are observed together in fewer than 3 rows ",
                            "(in %d of %d fitted model(s)); their copula correlations are not ",
-                           "identified and were filled by maximum-determinant completion. ",
-                           "See copula_correlation(fit, what = \"n_pair\")."),
-                    max(n_unid), sum(n_unid > 0L), length(mods)), call. = FALSE)
+                           "identified and %s, before any positive-definiteness repair. ",
+                           "See copula_correlation(fit, what = \"n_pair\") and summary(fit)."),
+                    max(n_unid), sum(n_unid > 0L), length(mods), how), call. = FALSE)
   }
   # t copula: say so when df could not be estimated (too few complete rows)
   if (copula == "t") {
@@ -651,7 +671,9 @@ summary.sp_synthesizer <- function(object, ...) {
                  n_train = object$n_train,
                  df = object$pooled$copula$df,
                  df_estimated = object$pooled$copula$df_estimated,
-                 unidentified = object$pooled$copula$unidentified %||% 0L),
+                 unidentified = object$pooled$copula$unidentified %||% 0L,
+                 completion = object$pooled$copula$completion %||% "none",
+                 pd_adjustment = object$pooled$copula$pd_adjustment %||% 0),
             class = "summary.sp_synthesizer")
 }
 
@@ -665,8 +687,16 @@ print.summary.sp_synthesizer <- function(x, ...) {
   }
   cat(" | missing data:", x$settings$missing, "\n")
   if (isTRUE(x$unidentified > 0L)) {
-    cat(sprintf("Unidentified pairwise correlations (filled by completion): %d\n",
-                x$unidentified))
+    cat(sprintf("Unidentified pairwise correlations: %d (%s)\n", x$unidentified,
+                if (identical(x$completion, "zero_fallback")) {
+                  "no consistent completion; set to 0"
+                } else {
+                  "filled by maximum-determinant completion"
+                }))
+  }
+  if (isTRUE(x$pd_adjustment > 1e-8)) {
+    cat(sprintf("Positive-definiteness repair changed correlations by up to %.3g\n",
+                x$pd_adjustment))
   }
   cat("\n")
   cols <- x$columns

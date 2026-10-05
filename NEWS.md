@@ -1,3 +1,28 @@
+# SynthesizerPlus 0.2.5
+
+Fixes from a fifth code review.
+
+* t copula: the pairwise counts (`n_pair`) and the identification of
+  pairwise correlations were computed on the random 2000-row subsample used
+  for Kendall's tau (bug introduced in 0.2.4). With more than 2000 rows,
+  `copula_correlation(fit, what = "n_pair")` under-reported the counts, and
+  a pair with sparse overlap (e.g. 10 joint rows out of 10,000) could be
+  declared unidentified, or estimated from only a few of its rows, depending
+  on the seed. Counts and identification now always use the full data, and
+  any pair that the subsample leaves with fewer than `min(n_pair, 500)` joint
+  rows is re-estimated from up to 2000 of its own joint rows.
+* t copula fitting is about 3-4 times faster with many variables: Kendall's
+  tau for all pairs is computed as one blocked cross-product of sign
+  matrices (exact for the tie-free pseudo-observations) instead of
+  `p(p - 1)/2` separate O(n^2) calls of `cor(method = "kendall")`. Estimates
+  for complete data are unchanged.
+* The fitted copula records how unidentified correlations were filled
+  (`completion`: `"none"`, `"maxdet"` or `"zero_fallback"`) and the largest
+  change made by the subsequent positive-definiteness repair
+  (`pd_adjustment`); `summary()` reports both. The fit-time warning now
+  states the method actually used and that the repair may follow, instead of
+  always claiming maximum-determinant completion.
+
 # SynthesizerPlus 0.2.4
 
 Fixes from a fourth code review.

@@ -371,7 +371,7 @@ test_that("a pair seen together in only 2 rows does not distort identified pairs
 })
 
 test_that("completion keeps identified entries and falls back to zero if impossible", {
-  cc <- SynthesizerPlus:::.complete_corr
+  cc <- function(R, unid) SynthesizerPlus:::.complete_corr(R, unid)$R
   R <- matrix(c(1, NA, 0.5, NA, 1, 0.4, 0.5, 0.4, 1), 3)
   unid <- is.na(R)
   W <- cc(R, unid)
@@ -413,4 +413,122 @@ test_that("r_mvskewnorm() requires a positive-definite omega", {
                             alpha = c(1, 0, 0)), "positive definite")
   # PSD-but-singular sigma stays allowed for the normal and t families
   expect_silent(r_mvt(5, df = 4, sigma = matrix(1, 2, 2), seed = 1))
+})
+
+
+# ---- 0.2.5: fifth external review -----------------------------------------
+
+test_that("t-copula n_pair uses the full data, not the Kendall subsample", {
+  set.seed(123)
+  n <- 5000L
+  d <- data.frame(x = rnorm(n), y = rnorm(n), z = rnorm(n))
+  fit <- fit_synthesizer(d, copula = "t")
+  np <- copula_correlation(fit, what = "n_pair")
+  expect_identical(unname(np), matrix(n, 3, 3))
+  expect_identical(fit$pooled$copula$completion, "none")
+})
+
+test_that("t-copula identification and estimation do not depend on the subsample", {
+  n <- 10000L
+  z <- r_mvnorm(n, sigma = make_corr(3, rho = 0.7), seed = 1)
+  d <- data.frame(x = z[, 1], y = z[, 2], z = z[, 3])
+  d$x[-(1:3000)] <- NA
+  d$y[11:7000] <- NA                        # x and y jointly observed in 10 rows only
+  res <- vapply(1:6, function(s) {
+    set.seed(s)
+    f <- suppressWarnings(fit_synthesizer(d, copula = "t", missing = "drop"))
+    c(np = copula_correlation(f, what = "n_pair")["x", "y"],
+      unid = f$pooled$copula$unidentified,
+      rxy = copula_correlation(f)["x", "y"])
+  }, numeric(3))
+  expect_true(all(res["np", ] == 10))
+  expect_true(all(res["unid", ] == 0))
+  # all 10 joint rows are used, so the estimate is the same for every seed
+  expect_lt(diff(range(res["rxy", ])), 1e-6)
+  # same pattern below the subsampling size
+  small <- d[c(1:10, sample(11:n, 1500)), ]
+  f <- suppressWarnings(fit_synthesizer(small, copula = "t", missing = "drop"))
+  expect_identical(copula_correlation(f, what = "n_pair")["x", "y"], 10L)
+})
+
+test_that(".kendall_matrix() equals stats::cor(method = 'kendall') with missing values", {
+  set.seed(4)
+  U <- matrix(runif(600 * 5), 600, 5)
+  U[, 2] <- U[, 1] + 0.3 * runif(600)
+  U[runif(length(U)) < 0.3] <- NA
+  U[1:595, 5] <- NA                                # very sparse column
+  a <- SynthesizerPlus:::.kendall_matrix(U)
+  b <- suppressWarnings(cor(U, method = "kendall", use = "pairwise.complete.obs"))
+  expect_identical(unname(is.na(a)), unname(is.na(b)))
+  expect_equal(unname(a), unname(b), tolerance = 1e-12)
+  # tiny blocks give the same answer
+  expect_equal(SynthesizerPlus:::.kendall_matrix(U, block_cells = 1), a, tolerance = 1e-12)
+  # fewer than 2 joint rows: undefined
+  V <- cbind(c(0.1, NA, NA), c(NA, 0.2, 0.3), c(0.5, 0.6, 0.7))
+  expect_true(is.na(SynthesizerPlus:::.kendall_matrix(V)[1, 2]))
+})
+
+test_that("completion method and repair size are recorded and reported", {
+  cc <- SynthesizerPlus:::.complete_corr
+  R <- matrix(c(1, NA, 0.5, NA, 1, 0.4, 0.5, 0.4, 1), 3)
+  expect_identical(cc(R, is.na(R))$method, "maxdet")
+  Rx <- diag(4)
+  Rx[1, 2] <- Rx[2, 1] <- 0.99; Rx[2, 3] <- Rx[3, 2] <- 0.99
+  Rx[1, 3] <- Rx[3, 1] <- -0.99
+  Rx[1, 4] <- Rx[4, 1] <- NA
+  expect_identical(cc(Rx, is.na(Rx))$method, "zero_fallback")
+
+  d <- split_modules()
+  fit <- suppressWarnings(fit_synthesizer(d, missing = "drop"))
+  expect_identical(fit$pooled$copula$completion, "maxdet")
+  expect_gte(fit$pooled$copula$pd_adjustment, 0)
+  expect_identical(fit_synthesizer(iris)$pooled$copula$completion, "none")
+  expect_output(print(summary(fit)), "maximum-determinant completion")
+  fit$pooled$copula$completion <- "zero_fallback"
+  fit$pooled$copula$pd_adjustment <- 0.05
+  out <- capture.output(print(summary(fit)))
+  expect_true(any(grepl("no consistent completion; set to 0", out)))
+  expect_true(any(grepl("repair changed correlations by up to 0.05", out)))
+  # the warning mentions the later repair step
+  expect_warning(fit_synthesizer(d, missing = "drop"), "before any positive-definiteness repair")
+})
+
+test_that("under-represented pairs are re-estimated from at most tau_rows joint rows", {
+  set.seed(5)
+  n <- 3000L
+  z <- r_mvnorm(n, sigma = make_corr(3, rho = 0.6), seed = 5)
+  U <- apply(z, 2, function(v) rank(v) / (n + 1))
+  U[sample(n, 2700), 1] <- NA                     # column 1 sparse: 300 joint rows
+  obs <- !is.na(U)
+  np <- crossprod(obs + 0)
+  # subsample of 100 rows leaves ~10 joint rows for column 1 (< min(300, 80)),
+  # so those pairs are redone on 100 of their own 300 joint rows
+  R <- SynthesizerPlus:::.pairwise_kendall_corr(U, obs, np, tau_rows = 100L, tau_min_rows = 80L)
+  expect_true(all(is.finite(R)))
+  expect_equal(R[1, 2], 0.6, tolerance = 0.35)
+  expect_equal(R, t(R))
+})
+
+test_that("the fit warning describes a zero fallback when no completion exists", {
+  d <- split_modules()
+  testthat::local_mocked_bindings(.complete_corr = function(R, unid) {
+    R[unid] <- 0
+    list(R = R, method = "zero_fallback")
+  })
+  expect_warning(f <- fit_synthesizer(d, missing = "drop"), "could not be completed consistently")
+  expect_identical(f$pooled$copula$completion, "zero_fallback")
+})
+
+test_that("mixed completion methods across strata are reported", {
+  d <- split_modules(n = 400)
+  d$g <- rep(c("a", "b"), times = 200)
+  calls <- 0L
+  testthat::local_mocked_bindings(.complete_corr = function(R, unid) {
+    calls <<- calls + 1L
+    R0 <- R
+    R0[unid] <- 0
+    list(R = R0, method = if (calls == 2L) "zero_fallback" else "maxdet")
+  })
+  expect_warning(fit_synthesizer(d, by = "g", missing = "drop", min_stratum_size = 10),
+                 "set to 0 in 1 model")
 })
