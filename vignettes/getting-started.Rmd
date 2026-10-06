@@ -71,13 +71,38 @@ broken at random, and discrete variables use a randomised transform), so for
 a fully reproducible workflow give the fit a seed too:
 `fit_synthesizer(mtcars, seed = 1)`.
 
-For a quick one-off, `synthesize()` fits and generates in one call, and can
-write the result straight to a file:
+For a quick one-off, `synthesize()` fits and generates in one call:
 
 ```{r}
 syn2 <- synthesize(mtcars, n = 100, seed = 2)
 str(syn2[, 1:5])
 ```
+
+With a `file` argument, the synthetic data are also written to disk (and
+returned invisibly). The format follows the file extension; here a CSV file
+in a temporary folder:
+
+```{r}
+out_csv <- file.path(tempdir(), "mtcars_synthetic.csv")
+synthesize(mtcars, n = 100, seed = 2, file = out_csv)
+file.exists(out_csv)
+readLines(out_csv, n = 3)          # the first lines of the file
+```
+
+`read_data()` reads the file back. With `template =` the column classes of
+the original data are restored, which matters for formats such as CSV that do
+not store them:
+
+```{r}
+syn_back <- read_data(out_csv, template = mtcars)
+str(syn_back[, 1:5])
+all.equal(syn_back, syn2, check.attributes = FALSE)   # the file holds the same data
+```
+
+The same works for any supported format, e.g. `file = "synthetic.parquet"`,
+`"synthetic.xlsx"` or `"synthetic.h5"` (see `supported_formats()` and
+`vignette("file-formats")`). A fitted model can also write a new file
+whenever needed, with `write_data(generate(fit, n = 1000), "synthetic.rds")`.
 
 ## Supported column types
 

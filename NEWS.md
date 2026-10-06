@@ -1,3 +1,13 @@
+# SynthesizerPlus 0.2.8
+
+* DESCRIPTION: the Description now states how discrete and categorical
+  variables enter the model (distributional transform, maximum-likelihood
+  polychoric and polyserial correlations, with references) and mentions the
+  missing-data model, closeness calibration and the correct attribution
+  probability.
+* Getting-started vignette: the `synthesize(file = )` example now writes a
+  file, shows its first lines and reads it back with `read_data()`.
+
 # SynthesizerPlus 0.2.7
 
 Statistical validation, and the bias it uncovered.
