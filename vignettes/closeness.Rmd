@@ -54,7 +54,8 @@ round(dist, 3)
 ```
 
 As `closeness` decreases, a classifier distinguishes synthetic from real
-records more easily (higher AUC), synthetic records are further from their
+records more easily (higher AUC, which levels off close to 1 once the data
+are clearly different), synthetic records are further from their
 nearest real record (higher DCR ratio, see `?dcr`), and the marginal
 distributions and associations drift away from the real ones.
 

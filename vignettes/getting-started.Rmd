@@ -38,13 +38,16 @@ SynthesizerPlus estimates
    between order statistics, so synthetic values fall between observed ones
    and within the observed range), and the empirical probability table for
    discrete, categorical, ordinal and logical variables;
-2. a **copula** — Gaussian (default), Student-*t* or independence — from the
-   rank correlations of the data. Discrete and categorical columns enter the
-   copula through the *distributional transform*, so they are part of the
-   dependence structure instead of being sampled independently;
+2. a **copula** — Gaussian (default), Student-*t* or independence — whose
+   correlations are estimated from the normal scores of the data.
+   Discrete and categorical columns are part of the dependence structure
+   instead of being sampled independently; their correlations are
+   estimated by maximum likelihood (polyserial and polychoric
+   correlations, see `?fit_synthesizer`);
 3. a **missing-data model** — each column with missing values gets a
    missingness indicator that is also part of the copula, so both the
-   missingness rate and its relation to other variables are reproduced.
+   missingness rate and its (monotone) relation to other variables are
+   reproduced.
 
 Generation reverses the steps: draw from the copula, push each uniform
 through the corresponding quantile function, and restore the original column
@@ -107,16 +110,39 @@ observed range.
 
 ## Missing values
 
-The default `missing = "joint"` reproduces both the share of missing values
-and how missingness relates to other variables. In `airquality`, ozone values
-are missing more often in June:
+The default `missing = "joint"` reproduces the share of missing values and
+how missingness depends on the other variables, as long as that dependence
+is *monotone* (missing more often for larger, or for smaller, values of
+another variable). Here income is missing more often for older people:
 
 ```{r}
-fit_aq <- fit_synthesizer(airquality)
-syn_aq <- generate(fit_aq, n = 5000, seed = 4)
-rbind(real = tapply(is.na(airquality$Ozone), airquality$Month, mean),
-      synthetic = tapply(is.na(syn_aq$Ozone), syn_aq$Month, mean))
+set.seed(11)
+age <- round(runif(2000, 18, 80))
+income <- exp(7 + 0.01 * age + rnorm(2000, sd = 0.5))
+income[runif(2000) < plogis(-4 + 0.05 * age)] <- NA
+svy <- data.frame(age, income)
+syn_svy <- generate(fit_synthesizer(svy, seed = 1), n = 20000, seed = 1)
+bands <- function(a) cut(a, c(17, 30, 45, 60, 80))
+rbind(real = tapply(is.na(svy$income), bands(svy$age), mean),
+      synthetic = tapply(is.na(syn_svy$income), bands(syn_svy$age), mean))
 ```
+
+A single copula cannot represent a *non-monotone* pattern. In `airquality`,
+ozone is missing far more often in June than in the months before and after
+it; the pooled model can only spread that excess into a trend over the
+months. Stratifying by month reproduces the pattern:
+
+```{r}
+aq_pooled <- generate(fit_synthesizer(airquality, seed = 1), n = 5000, seed = 4)
+aq_strat <- generate(fit_synthesizer(airquality, by = "Month", seed = 1), n = 5000, seed = 4)
+miss_by_month <- function(d) tapply(is.na(d$Ozone), d$Month, mean)
+round(rbind(real = miss_by_month(airquality), pooled = miss_by_month(aq_pooled),
+            `by = "Month"` = miss_by_month(aq_strat)), 2)
+```
+
+Missingness that depends on the unobserved value itself (e.g. high incomes
+are not reported *because* they are high) cannot be learned from the data,
+and is not reproduced.
 
 Use `missing = "independent"` to reproduce only the rates, or `"drop"` to
 generate complete data.

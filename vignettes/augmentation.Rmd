@@ -69,8 +69,10 @@ round(colMeans(res), 2)
 mean(res[, "tree_augmented"] < res[, "tree_real"])
 ```
 
-The regression tree improves clearly and consistently; the linear model does
-not. Before training, it is worth checking that the synthetic training data
+The regression tree improves on average, though not in every split (the
+second line is the share of splits in which augmentation lowered its error);
+the linear model does not change. The gain for a single small data set is
+uncertain, which is why the comparison must be repeated over several splits. Before training, it is worth checking that the synthetic training data
 resemble the real training data:
 
 ```{r, fig.height = 4.5}

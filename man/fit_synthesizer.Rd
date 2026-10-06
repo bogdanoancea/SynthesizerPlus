@@ -47,8 +47,13 @@ fitted on all rows.}
 
 \item{missing}{How missing values are treated: \code{"joint"} (default; model
 missingness inside the copula), \code{"independent"} (reproduce the missing
-rate of each column independently) or \code{"drop"} (never generate missing
-values).}
+rate of each column independently) or \code{"drop"} (do not reproduce
+missingness: partially observed columns are generated without missing
+values; a column with \emph{no} observed training value has no distribution
+to draw from and necessarily stays entirely missing). Under \code{"joint"},
+missingness may depend on the other variables (missing at random); it
+cannot depend on the unobserved value itself, which the data do not
+identify (see \emph{Estimation details}).}
 
 \item{interpolation}{Interpolation of the empirical quantile function for
 continuous variables: \code{"linear"} (default) or \code{"spline"} (monotone Hyman
@@ -94,12 +99,14 @@ between, rather than on, the observed values, always within the
 observed range. With small samples this slightly reduces the spread in
 the tails compared with the data;
 \item a \strong{copula} (Gaussian, Student-\emph{t} or independence) that couples the
-columns. Mixed continuous / discrete data are handled with the
-distributional transform, so categorical variables take part in the
-dependence structure;
+columns. Discrete and categorical variables take part in the
+dependence structure: their pseudo-observations use the distributional
+transform, and their latent correlations are estimated by maximum
+likelihood (polyserial / polychoric), see \emph{Estimation details};
 \item an optional \strong{missing-data model}: for each column with missing values
 a missingness indicator is added to the copula, so that the rate of
-missingness \emph{and} its association with other variables are reproduced;
+missingness \emph{and} its (monotone) association with other variables are
+reproduced;
 \item optional \strong{stratification} (\code{by}), fitting separate models within
 groups, with a pooled fallback for small groups.
 }
@@ -109,22 +116,51 @@ Use \code{\link[=generate]{generate()}} to draw synthetic data from the fitted m
 }
 \section{Estimation details}{
 
-\emph{Latent correlations.} For the Gaussian copula the latent correlation
-matrix is the Pearson correlation of the normal scores
-\eqn{\Phi^{-1}(U)}; for the t copula it is obtained by inverting Kendall's
-tau, \eqn{\rho = \sin(\pi\tau/2)}. As Kendall's tau is quadratic in
-the sample size, it is computed on a random subsample of 2000 rows; a pair
-that the subsample leaves with fewer than \eqn{\min(n_{ij}, 500)} jointly
-observed rows is re-estimated from up to 2000 of its own \eqn{n_{ij}}
-joint rows, so every pair with \eqn{n_{ij} \ge 3} is estimated whatever the
-subsample. With incomplete data both are computed from \strong{pairwise
-complete observations}. Pairwise estimates based on different subsets of
-rows need not form a coherent joint estimate, and the resulting matrix
-need not be positive definite; it is then projected onto the set of
-valid correlation matrices according to \code{pd_method} (Higham's nearest
+\emph{Latent correlations.} For a pair of continuous variables the Gaussian
+copula uses the normal scores \eqn{\Phi^{-1}(U)} and the t copula
+inverts Kendall's tau, \eqn{\rho = \sin(\pi\tau/2)}. As Kendall's tau is
+quadratic in the sample size, it is computed on a random subsample of 2000
+rows; a pair that the subsample leaves with fewer than
+\eqn{\min(n_{ij}, 500)} jointly observed rows is re-estimated from up to
+2000 of its own \eqn{n_{ij}} joint rows, so every pair with
+\eqn{n_{ij} \ge 3} is estimated whatever the subsample.
+
+\emph{Discrete and categorical variables.} The pseudo-observations of a
+discrete margin fill each category's probability interval with
+independent uniform noise (the distributional transform). Correlating
+these jittered scores would bias every dependence involving a discrete
+variable towards zero, most strongly for binary variables. Pairs with at
+least one discrete margin are therefore estimated by maximum likelihood
+under the Gaussian copula, with the thresholds fixed at the normal
+quantiles of the marginal cumulative probabilities: the polyserial
+correlation for a discrete-continuous pair (Olsson, Drasgow and Dorans,
+1982) and the polychoric correlation for a discrete-discrete pair
+(Olsson, 1979), using the bivariate normal distribution function of Genz
+(2004). The t copula uses the same estimates for these pairs. Unordered
+categories enter in the order of their levels, which is also the order
+used when generating, so the estimate is the maximum likelihood estimate
+of the model actually fitted.
+
+\emph{Missing data.} All estimates use \strong{pairwise complete observations}. The
+rows in which two variables are both observed may be a selected subset
+(e.g. \code{y} is observed mainly for low \code{x}), with a restricted range. For
+continuous pairs the estimate is therefore the pairwise \emph{covariance} of
+the normal scores, scaled by each variable's standard deviation over all
+of its observed values (for the t copula, the tau-based correlation
+rescaled in the same way). This reproduces the relation among the
+observed rows under such selection; with complete data it equals the
+ordinary correlation. With \code{missing = "joint"}, the missingness
+indicators are binary variables of the copula, so missingness can depend
+on the other variables (missing at random). The latent correlation
+between a variable and its \emph{own} indicator is fixed at 0: the data do not
+identify it (the value is never seen when missing), and this choice keeps
+the distribution of the observed values of each variable as in the
+training data. Pairwise estimates based on different subsets of rows
+need not form a coherent joint estimate, and the resulting matrix need not
+be positive definite; it is then projected onto the set of valid
+correlation matrices according to \code{pd_method} (Higham's nearest
 correlation matrix by default). The projection guarantees a valid model,
-not an optimal joint estimator: with heavy, non-random missingness the
-dependence structure is an approximation.
+not an optimal joint estimator.
 
 \emph{Unidentified pairs.} If two variables are observed together in fewer than
 3 rows (e.g. questions from different survey modules), their correlation
@@ -170,6 +206,18 @@ Sklar, A. (1959). Fonctions de répartition à n dimensions et leurs marges.
 
 Dempster, A. P. (1972). Covariance selection. \emph{Biometrics}, 28(1),
 157--175. \doi{10.2307/2528966}
+
+Genz, A. (2004). Numerical computation of rectangular bivariate and
+trivariate normal and t probabilities. \emph{Statistics and Computing}, 14(3),
+251--260. \doi{10.1023/B:STCO.0000035304.20635.31}
+
+Olsson, U. (1979). Maximum likelihood estimation of the polychoric
+correlation coefficient. \emph{Psychometrika}, 44(4), 443--460.
+\doi{10.1007/BF02296207}
+
+Olsson, U., Drasgow, F. and Dorans, N. J. (1982). The polyserial
+correlation coefficient. \emph{Psychometrika}, 47(3), 337--347.
+\doi{10.1007/BF02294164}
 
 Rüschendorf, L. (2009). On the distributional transform, Sklar's theorem,
 and the empirical copula process. \emph{Journal of Statistical Planning and

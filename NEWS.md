@@ -1,3 +1,85 @@
+# SynthesizerPlus 0.2.7
+
+Statistical validation, and the bias it uncovered.
+
+## Changes to fitted models
+
+* **Dependence involving discrete or categorical variables was attenuated.**
+  The latent correlation of a pair with a discrete margin was estimated by
+  correlating its jittered pseudo-observations (distributional transform),
+  which biases it towards zero, most strongly for binary variables. In a
+  validation design, Kendall's tau between a count and a 4-category factor
+  was 0.29 in synthetic data against 0.35 in the training data; under
+  missing-at-random (MAR) missingness, the association between `x` and the
+  missingness of `y` was reproduced at about 60% of its strength (0.30
+  instead of 0.51). Such pairs are now estimated by maximum likelihood under
+  the Gaussian copula: polyserial (discrete-continuous) and polychoric
+  (discrete-discrete) correlations, with thresholds from the marginal
+  probabilities (Olsson 1979; Olsson, Drasgow and Dorans 1982) and the
+  bivariate normal CDF of Genz (2004). The estimates agree with `polycor`'s
+  two-step estimators to about 1e-5. The t copula uses them for these pairs.
+* **Missing data: range restriction.** With incomplete data, continuous
+  pairs are now estimated by the pairwise covariance of the normal scores
+  scaled by each variable's standard deviation over all its observed values
+  (for the t copula: the tau-based correlation rescaled in the same way),
+  instead of the pairwise correlation. When missingness of `y` depends on
+  `x`, the rows where both are observed have a restricted range; the new
+  estimator reproduces the relation among the observed rows (e.g.
+  `cor(x, y)` among observed rows 0.568 synthetic vs 0.572 real, where the
+  old estimator, combined with the first fix, would give 0.646). With
+  complete data nothing changes.
+* The latent correlation between a variable and its own missingness
+  indicator is now fixed at 0 by design (it is not identified, and this
+  keeps the distribution of the observed values); it used to be ~0 by
+  accident of the jitter. A discrete margin with a single category has zero
+  correlations without being reported as unidentified.
+* Fitted models therefore differ from 0.2.6 whenever discrete/categorical
+  variables or missing values are present; with only continuous, complete
+  variables they are unchanged. Fitting is slower with many discrete
+  variables or missingness indicators (e.g. 1.5 s instead of 0.1 s for
+  5000 rows with 55 copula columns); the polyserial likelihood is evaluated
+  on 500 quantile bins for large samples (difference to the exact estimate
+  < 5e-4) and the polychoric likelihood only at the corners of observed
+  cells. Synthetic `iris` now keeps the species separation much better (a
+  petal-based rule classifies 82% of synthetic records correctly vs 66%;
+  real data 96%).
+* The fitted copula records the estimator used (`latent`:
+  `"normal_scores"` or `"polyserial_polychoric"`).
+
+## Statistical validation suite
+
+* New `tests/testthat/test-validation.R`: data simulated from known
+  distributions, dependence structures, missingness mechanisms (MCAR, MAR),
+  strata and VAR processes; synthetic samples are compared with the truth
+  or the training data within Monte Carlo tolerances (marginals, latent
+  correlations, rank association with discrete margins, 2 x 2 tables, MAR
+  missingness probabilities, observed-row relations, stratum means and
+  correlations, t-copula df and tail dependence, VAR auto- and
+  cross-correlations). Run against 0.2.6, it fails 11 expectations in
+  exactly the areas affected by the bias above. The large designs are
+  skipped on CRAN; one fast MAR check always runs.
+
+## Other changes (seventh code review)
+
+* `fit_synthesizer.ts()` warns when an argument does not apply to the chosen
+  method (`block_length` outside the bootstraps, `order`/`burn_in` outside
+  `"copula_var"`, `max_lag` when `order` is given).
+* `disclosure_risk()` gains `abs_tolerance` for numeric targets: a
+  prediction is correct if within `max(tolerance * |y|, abs_tolerance)`, so
+  targets with meaningful zeros can be assessed.
+* Documentation: `missing = "drop"` leaves columns without any observed value
+  entirely missing; missingness that depends on the unobserved value itself
+  (MNAR) is not reproduced; the time-series methods assume approximately
+  stationary series (`?fit_synthesizer.ts`, time-series vignette).
+* The getting-started vignette claimed that the pooled model reproduces the
+  June peak of missing ozone values in `airquality`; its own output showed
+  otherwise (also in 0.2.6). A single copula only represents monotone
+  relations; the section now shows a monotone MAR example and that
+  `by = "Month"` reproduces the non-monotone pattern.
+* Tests no longer use `testthat::local_mocked_bindings()` (testthat >=
+  3.1.7) or `data.frame()` on an `integer64` column (needs bit64), which
+  failed on R 4.2 with an older testthat.
+
 # SynthesizerPlus 0.2.6
 
 Fixes from a sixth code review.

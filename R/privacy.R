@@ -19,7 +19,8 @@
 #'   same key values and predicts each `target` (sensitive) variable: the
 #'   most frequent category, or the median for numeric targets. `cap` is the
 #'   share of real records for which the prediction is correct (numeric
-#'   targets: within `tolerance` relative error), among those with at least
+#'   targets: within `tolerance` relative error or `abs_tolerance` absolute
+#'   error), among those with at least
 #'   one matching synthetic record. `cap_baseline` is the same share when the
 #'   intruder ignores the synthetic data and predicts the overall mode or
 #'   median; `cap_uniques` restricts the CAP to real uniques. A CAP close to
@@ -38,6 +39,12 @@
 #'   otherwise hide exact copies).
 #' @param tolerance Relative tolerance for a correct prediction of numeric
 #'   targets (default 0.1, i.e. 10 percent).
+#' @param abs_tolerance Absolute tolerance for numeric targets (default 0).
+#'   A prediction is correct if \eqn{|\hat y - y| \le
+#'   \max(\mathrm{tolerance} \cdot |y|, \mathrm{abs\_tolerance})}. A purely
+#'   relative tolerance is (essentially) zero for a true value of 0, so use
+#'   `abs_tolerance` for targets with meaningful zeros (e.g. income of
+#'   non-earners), in the units of the target.
 #' @return An object of class `sp_disclosure` with elements
 #'   `replicated_uniques`, `real_unique_rate` (share of real records that are
 #'   unique on the keys), `exact_copies` (share of synthetic records that are
@@ -65,7 +72,7 @@
 #'                 target = c("income", "education"), ignore = "person_id")
 #' @export
 disclosure_risk <- function(real, synthetic, keys, target = NULL, ignore = NULL,
-                            tolerance = 0.1) {
+                            tolerance = 0.1, abs_tolerance = 0) {
   p <- .check_pair(real, synthetic)
   real <- p$real
   synthetic <- p$synthetic
@@ -82,6 +89,10 @@ disclosure_risk <- function(real, synthetic, keys, target = NULL, ignore = NULL,
   synthetic <- synthetic[keep]
   if (!is.numeric(tolerance) || length(tolerance) != 1L || !is.finite(tolerance) || tolerance < 0) {
     stop("'tolerance' must be a single finite non-negative number.", call. = FALSE)
+  }
+  if (!is.numeric(abs_tolerance) || length(abs_tolerance) != 1L || !is.finite(abs_tolerance) ||
+      abs_tolerance < 0) {
+    stop("'abs_tolerance' must be a single finite non-negative number.", call. = FALSE)
   }
 
   kk <- .row_keys(real[keys], synthetic[keys])
@@ -111,13 +122,13 @@ disclosure_risk <- function(real, synthetic, keys, target = NULL, ignore = NULL,
       pred <- .predict_by_key(ks, ys, num)
       hat <- pred[kr]
       matched <- !is.na(names(pred)[match(kr, names(pred))]) & !is.na(yr)
-      correct <- .correct(hat, yr, num, tolerance)
+      correct <- .correct(hat, yr, num, tolerance, abs_tolerance)
       base_val <- if (num) {
         stats::median(as.numeric(yr), na.rm = TRUE)
       } else {
         names(which.max(table(as.character(yr))))
       }
-      base_correct <- .correct(rep(base_val, length(yr)), yr, num, tolerance)
+      base_correct <- .correct(rep(base_val, length(yr)), yr, num, tolerance, abs_tolerance)
       data.frame(
         target = tg,
         match_rate = mean(matched),
@@ -151,13 +162,14 @@ disclosure_risk <- function(real, synthetic, keys, target = NULL, ignore = NULL,
   stats::setNames(as.vector(out), names(out))
 }
 
-.correct <- function(hat, y, numeric, tolerance) {
+.correct <- function(hat, y, numeric, tolerance, abs_tolerance = 0) {
   res <- rep(FALSE, length(y))
   ok <- !is.na(hat) & !is.na(y)
   if (numeric) {
     yy <- as.numeric(y[ok])
     hh <- as.numeric(hat[ok])
-    res[ok] <- abs(hh - yy) <= tolerance * pmax(abs(yy), .Machine$double.eps)
+    res[ok] <- abs(hh - yy) <= pmax(tolerance * pmax(abs(yy), .Machine$double.eps),
+                                    abs_tolerance)
   } else {
     res[ok] <- as.character(hat[ok]) == as.character(y[ok])
   }

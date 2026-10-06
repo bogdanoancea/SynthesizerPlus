@@ -10,7 +10,8 @@ disclosure_risk(
   keys,
   target = NULL,
   ignore = NULL,
-  tolerance = 0.1
+  tolerance = 0.1,
+  abs_tolerance = 0
 )
 }
 \arguments{
@@ -27,6 +28,13 @@ otherwise hide exact copies).}
 
 \item{tolerance}{Relative tolerance for a correct prediction of numeric
 targets (default 0.1, i.e. 10 percent).}
+
+\item{abs_tolerance}{Absolute tolerance for numeric targets (default 0).
+A prediction is correct if \eqn{|\hat y - y| \le
+  \max(\mathrm{tolerance} \cdot |y|, \mathrm{abs\_tolerance})}. A purely
+relative tolerance is (essentially) zero for a true value of 0, so use
+\code{abs_tolerance} for targets with meaningful zeros (e.g. income of
+non-earners), in the units of the target.}
 }
 \value{
 An object of class \code{sp_disclosure} with elements
@@ -54,7 +62,8 @@ every real record, the intruder looks up the synthetic records with the
 same key values and predicts each \code{target} (sensitive) variable: the
 most frequent category, or the median for numeric targets. \code{cap} is the
 share of real records for which the prediction is correct (numeric
-targets: within \code{tolerance} relative error), among those with at least
+targets: within \code{tolerance} relative error or \code{abs_tolerance} absolute
+error), among those with at least
 one matching synthetic record. \code{cap_baseline} is the same share when the
 intruder ignores the synthetic data and predicts the overall mode or
 median; \code{cap_uniques} restricts the CAP to real uniques. A CAP close to

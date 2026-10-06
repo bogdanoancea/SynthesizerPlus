@@ -26,6 +26,17 @@
 #'
 #' Missing values are linearly interpolated before fitting (with a warning).
 #'
+#' *Scope.* All four methods treat the series as (approximately)
+#' **stationary**: the empirical marginal distribution and the dependence
+#' structure are assumed constant over time. A trend, a level shift, changing
+#' variance or strong deterministic seasonality is reproduced only
+#' imperfectly (e.g. a trending series is resampled around its overall
+#' distribution, and a seasonal pattern only as far as the VAR order or block
+#' length covers it). For such data, model the deterministic part yourself
+#' (detrend, difference or deseasonalise), synthesise the stationary
+#' remainder, and add the deterministic part back. Arguments that the chosen
+#' method does not use trigger a warning.
+#'
 #' @param data A `ts` object (univariate or multivariate).
 #' @param method One of `"copula_var"`, `"block"`, `"stationary"`, `"iid"`.
 #' @param max_lag Maximum VAR order considered by `"copula_var"` when the
@@ -61,12 +72,34 @@ fit_synthesizer.ts <- function(data,
                                method = c("copula_var", "block", "stationary", "iid"),
                                max_lag = 10L, order = NULL, block_length = NULL,
                                burn_in = 100L, seed = NULL, ...) {
-  if (!is.null(seed)) {
-    return(.with_seed(seed, fit_synthesizer.ts(
-      data, method = method, max_lag = max_lag, order = order,
-      block_length = block_length, burn_in = burn_in, seed = NULL, ...)))
-  }
   method <- match.arg(method)
+  # arguments that the chosen method does not use
+  ignored <- c(
+    max_lag = !missing(max_lag) && (method != "copula_var" || !is.null(order)),
+    order = !missing(order) && !is.null(order) && method != "copula_var",
+    burn_in = !missing(burn_in) && method != "copula_var",
+    block_length = !missing(block_length) && !is.null(block_length) &&
+      !method %in% c("block", "stationary")
+  )
+  if (any(ignored)) {
+    why <- c(max_lag = if (method == "copula_var") "it is only used when 'order' is NULL"
+             else "it is only used by method = \"copula_var\"",
+             order = "it is only used by method = \"copula_var\"",
+             burn_in = "it is only used by method = \"copula_var\"",
+             block_length = "it is only used by methods \"block\" and \"stationary\"")
+    for (a in names(ignored)[ignored]) {
+      warning(sprintf("'%s' is ignored for method = \"%s\": %s.", a, method, why[[a]]),
+              call. = FALSE)
+    }
+  }
+  if (!is.null(seed)) {
+    return(.with_seed(seed, .fit_ts(data, method, max_lag, order, block_length,
+                                    burn_in, ...)))
+  }
+  .fit_ts(data, method, max_lag, order, block_length, burn_in, ...)
+}
+
+.fit_ts <- function(data, method, max_lag, order, block_length, burn_in, ...) {
   max_lag <- .check_count(max_lag, "max_lag")
   if (!is.null(order)) order <- .check_count(order, "order")
   burn_in <- .check_count(burn_in, "burn_in")

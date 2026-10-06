@@ -76,8 +76,14 @@ plot_ts(lh, syn_b)
 
 ## Practical notes
 
-* The copula-VAR assumes (approximately) stationary dynamics. For trending
-  series, model the differences or growth rates and cumulate afterwards.
+* All four methods assume (approximately) **stationary** series: the
+  marginal distribution and the dependence structure are taken to be constant
+  over time. A trend, a level shift, changing variance or strong deterministic
+  seasonality is reproduced only imperfectly. Model the deterministic part
+  yourself (difference, detrend, deseasonalise or use growth rates),
+  synthesise the stationary remainder and add the deterministic part back.
+  The `order` of the copula-VAR should cover the seasonal period (e.g.
+  `order = 12` for monthly data, see `vignette("augmentation")`).
 * Missing values are linearly interpolated before fitting, with a warning.
 * `simulate(fit, nsim = 10)` returns ten independent synthetic series.
 

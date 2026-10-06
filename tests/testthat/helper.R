@@ -16,3 +16,12 @@ mixed_data <- function(n = 300, seed = 1) {
     stringsAsFactors = FALSE
   )
 }
+
+# absolute-difference expectation (testthat 3e's expect_equal() tolerance is
+# relative); works for vectors and matrices
+expect_near <- function(object, expected, tol) {
+  diff <- max(abs(as.numeric(object) - as.numeric(expected)))
+  expect(is.finite(diff) && diff <= tol,
+         sprintf("max |difference| = %.4g exceeds %.4g", diff, tol))
+  invisible(object)
+}

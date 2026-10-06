@@ -7,10 +7,17 @@
 # by the maximum-determinant completion of the identified entries (falling
 # back to 0 if that fails). The counts are kept in `n_pair`; they always refer
 # to the full data, never to a computational subsample.
+# `cuts` (optional, one element per column): NULL for a continuous margin,
+# c(0, cumulative probabilities) for a discrete one; pairs involving a
+# discrete margin are then estimated by polyserial / polychoric maximum
+# likelihood (see latent.R). `fixed_zero` (optional logical matrix) marks
+# pairs whose latent correlation is 0 by design (a variable and its own
+# missingness indicator); they are neither estimated nor reported.
 .fit_copula <- function(U, family = c("gaussian", "t", "independence"),
                         pd_method = c("auto", "higham", "eigen", "none"),
                         df_grid = c(2, 3, 4, 5, 6, 8, 10, 15, 20, 30, 50, 100),
-                        max_rows = 5000L, min_pair_obs = 3L, tau_rows = 2000L) {
+                        max_rows = 5000L, min_pair_obs = 3L, tau_rows = 2000L,
+                        cuts = NULL, fixed_zero = NULL) {
   family <- match.arg(family)
   pd_method <- match.arg(pd_method)
   d <- ncol(U)
@@ -35,12 +42,48 @@
   dimnames(np) <- list(nm, nm)
 
   if (family == "gaussian") {
+    # Pairwise covariance of the normal scores, scaled by each variable's
+    # standard deviation over *all* its observed values (not over the
+    # pairwise rows). The rows where two variables are both observed can be
+    # a selected subset (e.g. y observed mainly for low x); a pairwise
+    # correlation then reflects the restricted range, while the covariance
+    # is what the latent model reproduces under that selection. With complete
+    # data this equals the ordinary correlation.
     Z <- stats::qnorm(U)
-    R <- suppressWarnings(stats::cor(Z, use = "pairwise.complete.obs"))
+    C <- suppressWarnings(stats::cov(Z, use = "pairwise.complete.obs"))
+    sdf <- sqrt(diag(C))
+    R <- C / outer(sdf, sdf)
   } else {
     R <- .pairwise_kendall_corr(U, obs, np, tau_rows = tau_rows)
+    # same range-restriction correction as for the Gaussian copula: rescale
+    # the tau-based correlation of the jointly observed rows by the ratio of
+    # the normal-score standard deviations on those rows to those on all
+    # observed values (exactly 1 with complete data)
+    if (any(!obs)) R <- R * .range_factor(stats::qnorm(U), obs)
   }
-  unid <- (np < min_pair_obs) | !is.finite(R)
+  if (is.null(fixed_zero)) fixed_zero <- matrix(FALSE, d, d)
+  # a discrete margin with a single category carries no dependence: its
+  # correlations are 0 by construction
+  degenerate <- vapply(seq_len(d), function(j) {
+    !is.null(cuts[[j]]) && length(cuts[[j]]) <= 2L
+  }, logical(1))
+  fixed_zero <- fixed_zero | outer(degenerate, rep(TRUE, d)) | outer(rep(TRUE, d), degenerate)
+  diag(fixed_zero) <- FALSE
+  # discrete margins: maximum-likelihood latent correlations
+  disc <- if (is.null(cuts)) rep(FALSE, d) else !vapply(cuts, is.null, logical(1))
+  latent <- "normal_scores"
+  if (any(disc)) {
+    todo <- (outer(disc, rep(TRUE, d)) | outer(rep(TRUE, d), disc)) &
+      np >= min_pair_obs & !fixed_zero
+    diag(todo) <- FALSE
+    if (any(todo)) {
+      est <- .discrete_latent_corr(U, cuts, todo)
+      R[todo] <- est[todo]
+      latent <- "polyserial_polychoric"
+    }
+  }
+  R[fixed_zero] <- 0
+  unid <- ((np < min_pair_obs) | !is.finite(R)) & !fixed_zero
   diag(unid) <- FALSE
   R[unid] <- NA
   diag(R) <- 1
@@ -69,7 +112,25 @@
   })
   list(family = family, R = R, df = df, df_estimated = df_estimated, chol = ch,
        n_pair = np, unidentified = as.integer(sum(unid) / 2),
-       completion = completion, pd_adjustment = pd_adjustment)
+       completion = completion, pd_adjustment = pd_adjustment,
+       latent = latent)
+}
+
+# Range-restriction factor sd_i|j sd_j|i / (sd_i sd_j), where sd_i|j is the
+# standard deviation of column i over the rows where columns i and j are
+# both observed and sd_i over all rows where i is observed
+.range_factor <- function(Z, obs) {
+  Z0 <- Z
+  Z0[!obs] <- 0
+  O <- obs + 0
+  n_ij <- crossprod(O)
+  S1 <- crossprod(Z0, O)                   # sum of z_i over rows with i and j
+  S2 <- crossprod(Z0^2, O)
+  v_ij <- (S2 - S1^2 / n_ij) / (n_ij - 1)  # variance of z_i given j observed
+  v_i <- diag(v_ij)                        # variance of z_i over its own rows
+  f <- sqrt(pmax(v_ij, 0) * t(pmax(v_ij, 0)) / outer(v_i, v_i))
+  f[!is.finite(f)] <- 1
+  f
 }
 
 # Latent correlations of a t copula by inverting Kendall's tau,

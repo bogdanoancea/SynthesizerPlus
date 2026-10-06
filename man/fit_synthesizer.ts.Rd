@@ -61,6 +61,17 @@ copula model (see \code{\link[=fit_synthesizer]{fit_synthesizer()}}).
 }
 
 Missing values are linearly interpolated before fitting (with a warning).
+
+\emph{Scope.} All four methods treat the series as (approximately)
+\strong{stationary}: the empirical marginal distribution and the dependence
+structure are assumed constant over time. A trend, a level shift, changing
+variance or strong deterministic seasonality is reproduced only
+imperfectly (e.g. a trending series is resampled around its overall
+distribution, and a seasonal pattern only as far as the VAR order or block
+length covers it). For such data, model the deterministic part yourself
+(detrend, difference or deseasonalise), synthesise the stationary
+remainder, and add the deterministic part back. Arguments that the chosen
+method does not use trigger a warning.
 }
 \examples{
 fit <- fit_synthesizer(ldeaths)

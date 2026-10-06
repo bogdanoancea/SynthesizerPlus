@@ -509,28 +509,21 @@ test_that("under-represented pairs are re-estimated from at most tau_rows joint 
   expect_equal(R, t(R))
 })
 
-test_that("the fit warning describes a zero fallback when no completion exists", {
-  d <- split_modules()
-  testthat::local_mocked_bindings(.complete_corr = function(R, unid) {
-    R[unid] <- 0
-    list(R = R, method = "zero_fallback")
-  })
-  expect_warning(f <- fit_synthesizer(d, missing = "drop"), "could not be completed consistently")
-  expect_identical(f$pooled$copula$completion, "zero_fallback")
-})
-
-test_that("mixed completion methods across strata are reported", {
-  d <- split_modules(n = 400)
-  d$g <- rep(c("a", "b"), times = 200)
-  calls <- 0L
-  testthat::local_mocked_bindings(.complete_corr = function(R, unid) {
-    calls <<- calls + 1L
-    R0 <- R
-    R0[unid] <- 0
-    list(R = R0, method = if (calls == 2L) "zero_fallback" else "maxdet")
-  })
-  expect_warning(fit_synthesizer(d, by = "g", missing = "drop", min_stratum_size = 10),
-                 "set to 0 in 1 model")
+test_that("the unidentified-correlation message reports the completion method", {
+  # no mocking (testthat::local_mocked_bindings needs testthat >= 3.1.7):
+  # the message is built by an internal function from the fitted models
+  msg <- SynthesizerPlus:::.unidentified_message
+  mk <- function(k, method) list(copula = list(unidentified = k, completion = method))
+  expect_null(msg(list(mk(0L, "none"), mk(0L, "none"))))
+  expect_match(msg(list(mk(1L, "maxdet"))), "filled by maximum-determinant completion,")
+  m0 <- msg(list(mk(2L, "zero_fallback")))
+  expect_match(m0, "could not be completed consistently and were set to 0")
+  expect_match(m0, "^Up to 2 pair\\(s\\)")
+  mx <- msg(list(mk(1L, "maxdet"), mk(3L, "zero_fallback"), mk(0L, "none")))
+  expect_match(mx, "set to 0 in 1 model")
+  expect_match(mx, "Up to 3 pair\\(s\\) .*\\(affecting 2 of 3 fitted model")
+  # and the fit itself emits it
+  expect_warning(fit_synthesizer(split_modules(), missing = "drop"), "maximum-determinant completion")
 })
 
 # ---- 0.2.6: sixth external review -----------------------------------------
@@ -548,7 +541,8 @@ test_that("the unidentified-pairs warning reports a per-model maximum", {
 
 test_that("fit_synthesizer(seed = ) makes fitting reproducible", {
   set.seed(1)
-  d <- data.frame(x = rnorm(3000), k = sample(1:4, 3000, TRUE),
+  # x has ties (broken at random), so the fit itself is stochastic
+  d <- data.frame(x = round(rnorm(3000), 1), k = sample(1:4, 3000, TRUE),
                   f = factor(sample(letters[1:3], 3000, TRUE)))
   d$x[sample(3000, 300)] <- NA
   for (cop in c("gaussian", "t")) {
@@ -585,4 +579,120 @@ test_that("fit_synthesizer.ts(seed = ) is reproducible for every method", {
   set.seed(7); a <- runif(1)
   set.seed(7); fit_synthesizer(ldeaths, seed = 1); b <- runif(1)
   expect_identical(a, b)
+})
+
+# ---- 0.2.7: seventh external review + statistical validation --------------
+
+test_that(".pbvnorm() agrees with numerical integration", {
+  pb <- SynthesizerPlus:::.pbvnorm
+  ref <- function(a, b, r) {
+    integrate(function(x) dnorm(x) * pnorm((b - r * x) / sqrt(1 - r^2)), -Inf, a,
+              rel.tol = 1e-10)$value
+  }
+  for (r in c(-0.99, -0.6, 0, 0.3, 0.9, 0.99)) {
+    for (ab in list(c(0, 0), c(-1.2, 0.7), c(2, -0.5), c(1.5, 1.5))) {
+      expect_near(pb(ab[1], ab[2], r), ref(ab[1], ab[2], r), 1e-6)
+    }
+  }
+  # infinite limits reduce to univariate probabilities
+  expect_equal(pb(c(Inf, 0.4, -Inf), c(0.4, Inf, 1), 0.5), c(pnorm(0.4), pnorm(0.4), 0))
+  expect_equal(sum(SynthesizerPlus:::.gl20$w), 2)
+})
+
+test_that("polyserial and polychoric estimators recover the latent correlation", {
+  z <- r_mvnorm(20000, sigma = make_corr(2, rho = 0.65), seed = 1)
+  k <- findInterval(z[, 2], c(-Inf, -0.8, 0.2, 1.1, Inf))
+  tau <- qnorm(c(0, cumsum(tabulate(k, 4)) / 20000))
+  zz <- qnorm(rank(z[, 1]) / 20001)
+  expect_near(SynthesizerPlus:::.polyserial(zz, k, tau), 0.65, 0.02)
+  b <- as.integer(ceiling(rank(zz, ties.method = "first") * 500 / 20000))
+  expect_near(SynthesizerPlus:::.polyserial(zz, k, tau, bin = b),
+               SynthesizerPlus:::.polyserial(zz, k, tau), 1e-3)
+  k1 <- findInterval(z[, 1], c(-Inf, 0, 1, Inf))
+  N <- table(factor(k1, 1:3), factor(k, 1:4))
+  t1 <- qnorm(c(0, cumsum(tabulate(k1, 3)) / 20000))
+  expect_near(SynthesizerPlus:::.polychoric(unclass(N), t1, tau), 0.65, 0.02)
+  # empty cells and high-cardinality margins are handled
+  N2 <- unclass(N)
+  N2[1, 4] <- 0
+  expect_true(is.finite(SynthesizerPlus:::.polychoric(N2, t1, tau)))
+})
+
+test_that("a variable and its own missingness indicator are fixed at 0 and not reported", {
+  set.seed(2)
+  x <- rnorm(800)
+  y <- 0.5 * x + rnorm(800)
+  y[runif(800) < plogis(-1 + x)] <- NA
+  expect_silent(fit <- fit_synthesizer(data.frame(x, y)))
+  R <- copula_correlation(fit, include_missing = TRUE)
+  expect_identical(R["y", ".missing_y"], 0)
+  expect_gt(R["x", ".missing_y"], 0.3)                 # MAR dependence on x
+  # when r_xy^2 + r_xM^2 >= 1 a zero is infeasible and the repair moves it
+  y2 <- x + rnorm(800, sd = 0.3)
+  y2[x > 0.3] <- NA
+  f2 <- fit_synthesizer(data.frame(x, y2))
+  expect_gt(f2$pooled$copula$pd_adjustment, 0)
+  expect_identical(fit$pooled$copula$unidentified, 0L)
+  expect_identical(fit$pooled$copula$latent, "polyserial_polychoric")
+  expect_identical(fit_synthesizer(iris[1:4])$pooled$copula$latent, "normal_scores")
+})
+
+test_that("a single-category discrete margin has zero correlations without warnings", {
+  d <- data.frame(x = rnorm(50), k = factor(rep("a", 50)), y = rnorm(50))
+  expect_silent(fit <- fit_synthesizer(d))
+  expect_identical(unname(copula_correlation(fit)["k", c("x", "y")]), c(0, 0))
+})
+
+test_that("time-series arguments that the method ignores trigger warnings", {
+  expect_warning(fit_synthesizer(ldeaths, block_length = 12), "'block_length' is ignored")
+  expect_warning(fit_synthesizer(ldeaths, method = "block", order = 2), "'order' is ignored")
+  expect_warning(fit_synthesizer(ldeaths, method = "stationary", burn_in = 10), "'burn_in' is ignored")
+  expect_warning(fit_synthesizer(ldeaths, method = "iid", max_lag = 3), "'max_lag' is ignored")
+  expect_warning(fit_synthesizer(ldeaths, order = 12, max_lag = 3), "only used when 'order' is NULL")
+  # no warning when the arguments apply (also through the seed path)
+  expect_silent(fit_synthesizer(ldeaths, order = 12, burn_in = 50, seed = 1))
+  expect_silent(fit_synthesizer(ldeaths, method = "block", block_length = 6, seed = 1))
+  expect_silent(fit_synthesizer(ldeaths, max_lag = 4))
+  w <- testthat::capture_warnings(fit_synthesizer(ldeaths, method = "block", order = 2, seed = 3))
+  expect_length(w, 1L)                                # not repeated by the seed path
+})
+
+test_that("disclosure_risk(abs_tolerance = ) handles meaningful zeros", {
+  real <- data.frame(k = c("a", "a", "b", "b"), y = c(0, 0, 100, 100))
+  syn <- data.frame(k = c("a", "a", "b", "b"), y = c(0.5, 0.5, 105, 105))
+  r0 <- disclosure_risk(real, syn, keys = "k", target = "y")
+  expect_equal(r0$attribute$cap, 0.5)                 # 0 vs 0.5 is a miss
+  r1 <- disclosure_risk(real, syn, keys = "k", target = "y", abs_tolerance = 1)
+  expect_equal(r1$attribute$cap, 1)
+  expect_error(disclosure_risk(real, syn, keys = "k", target = "y", abs_tolerance = -1),
+               "abs_tolerance")
+  expect_error(disclosure_risk(real, syn, keys = "k", target = "y", abs_tolerance = NA),
+               "abs_tolerance")
+})
+
+test_that("missing = 'drop' keeps an entirely missing column missing", {
+  d <- data.frame(a = rnorm(30), b = NA_real_)
+  s <- generate(fit_synthesizer(d, missing = "drop"), 20, seed = 1)
+  expect_true(all(is.na(s$b)))
+  expect_false(anyNA(s$a))
+})
+
+test_that("a discrete margin with one category on the joint rows is unidentified", {
+  set.seed(3)
+  n <- 300
+  k <- factor(sample(c("a", "b"), n, TRUE))
+  g <- factor(sample(c("u", "v", "w"), n, TRUE))
+  x <- rnorm(n)
+  x[k == "b"] <- NA                       # x is only observed when k == "a"
+  g2 <- g
+  g2[k == "b"] <- NA                      # g2 also only observed when k == "a"
+  d <- data.frame(k, x, g2)
+  w <- testthat::capture_warnings(fit <- fit_synthesizer(d, missing = "drop"))
+  expect_true(any(grepl("not identified", w)))
+  expect_identical(fit$pooled$copula$unidentified, 2L)   # (k, x) and (k, g2)
+  expect_true(all(is.finite(copula_correlation(fit))))
+})
+
+test_that("unused arguments of fit_synthesizer.ts() are reported", {
+  expect_warning(fit_synthesizer(ldeaths, closeness = 0.5), "Closeness control is not available")
 })

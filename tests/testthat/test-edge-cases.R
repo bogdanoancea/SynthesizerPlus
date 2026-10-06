@@ -40,8 +40,10 @@ test_that("input validation of fit_synthesizer()", {
   expect_error(fit_synthesizer(iris, by = 1), "character vector")
   expect_error(SynthesizerPlus:::.as_plain_df(1:3), "data frame")
   expect_error(SynthesizerPlus:::.fit_marginal(complex(real = 1:3), "z"), "unsupported class")
-  i64 <- structure(c(1, 2, 3), class = "integer64")
-  expect_error(fit_synthesizer(data.frame(x = 1:3, i = i64)), "Unsupported column class in: i")
+  # built without data.frame(), which needs bit64's coercion method
+  d64 <- data.frame(x = 1:3)
+  d64$i <- structure(c(1, 2, 3), class = "integer64")
+  expect_error(fit_synthesizer(d64), "Unsupported column class in: i")
 })
 
 test_that("copula estimation corner cases", {
@@ -50,7 +52,11 @@ test_that("copula estimation corner cases", {
   expect_warning(fit <- fit_synthesizer(d, copula = "t", missing = "drop"), "df was not estimated")
   expect_equal(fit$pooled$copula$df, 10)
   # pd_method = "none" on a valid matrix
-  expect_s3_class(fit_synthesizer(iris, pd_method = "none"), "sp_synthesizer")
+  expect_s3_class(fit_synthesizer(iris[1:4], pd_method = "none"), "sp_synthesizer")
+  # Species is almost perfectly separated by petal size: its polyserial
+  # correlations are near 1 and the matrix needs the (default) repair
+  expect_error(fit_synthesizer(iris, pd_method = "none"), "not positive definite")
+  expect_gt(fit_synthesizer(iris)$pooled$copula$pd_adjustment, 0)
   expect_error(fit_synthesizer(data.frame(a = 1:30, b = 1:30, c = -(1:30)), pd_method = "none"),
                "not positive definite")
   # t df estimation subsamples large inputs
