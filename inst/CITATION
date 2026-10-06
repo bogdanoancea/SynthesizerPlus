@@ -1,0 +1,16 @@
+bibentry(
+  bibtype = "Manual",
+  header = "To cite SynthesizerPlus in publications, please use:",
+  title = "{SynthesizerPlus}: Synthetic Data Generation with Copulas, Evaluation and Multi-Format {I/O}",
+  author = person("Bogdan", "Oancea",
+                  comment = c(ORCID = "0000-0001-6987-5137")),
+  year = "2026",
+  note = paste("R package version", meta$Version),
+  doi = "10.5281/zenodo.23193076",
+  url = "https://github.com/bogdanoancea/SynthesizerPlus",
+  textVersion = paste0(
+    "Oancea, B. (2026). SynthesizerPlus: Synthetic Data Generation with ",
+    "Copulas, Evaluation and Multi-Format I/O. R package version ",
+    meta$Version, ". doi:10.5281/zenodo.23193076"
+  )
+)

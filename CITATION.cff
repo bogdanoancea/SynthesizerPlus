@@ -22,6 +22,11 @@ authors:
     affiliation: University of Bucharest
     orcid: "https://orcid.org/0000-0001-6987-5137"
 version: 0.2.8
+doi: 10.5281/zenodo.23193076
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.23193076
+    description: Zenodo concept DOI (all versions of the software)
 license: EUPL-1.2
 repository-code: "https://github.com/bogdanoancea/SynthesizerPlus"
 url: "https://github.com/bogdanoancea/SynthesizerPlus"
