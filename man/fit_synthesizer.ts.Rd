@@ -11,6 +11,7 @@
   order = NULL,
   block_length = NULL,
   burn_in = 100L,
+  seed = NULL,
   ...
 )
 }
@@ -31,6 +32,9 @@ monthly data.}
 (\code{"stationary"}). Default: \code{ceiling(n^(1/3))}.}
 
 \item{burn_in}{Number of burn-in steps discarded when simulating a VAR.}
+
+\item{seed}{Optional random seed making the fit reproducible (see
+\code{\link[=fit_synthesizer]{fit_synthesizer()}}).}
 
 \item{...}{Passed to \code{\link[=fit_synthesizer.data.frame]{fit_synthesizer.data.frame()}} when \code{method = "iid"}.}
 }

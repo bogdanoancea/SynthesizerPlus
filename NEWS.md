@@ -1,3 +1,21 @@
+# SynthesizerPlus 0.2.6
+
+Fixes from a sixth code review.
+
+* New `seed` argument in `fit_synthesizer()` (data frame, matrix, vector and
+  `ts` methods). Fitting is stochastic (random tie-breaking, the randomised
+  distributional transform, Kendall subsampling for the t copula), so the
+  fitted model can now be made reproducible when fitting and generation are
+  separate steps; the global RNG state is restored afterwards.
+* The warning about unidentified copula correlations now reports the
+  maximum number of affected pairs *per fitted model* ("Up to k pair(s) ...
+  per fitted model ... affecting m of M fitted model(s)"). Previously, with
+  stratified models, `k` could be read as a total.
+* Documentation: unidentified correlations are those with fewer than 3
+  jointly observed rows *or* a non-finite estimate, so `n_pair` alone does
+  not flag all of them (`?copula_correlation`, `?fit_synthesizer`).
+  `summary()` labels its count as referring to the pooled model.
+
 # SynthesizerPlus 0.2.5
 
 Fixes from a fifth code review.

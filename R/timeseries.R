@@ -37,6 +37,8 @@
 #' @param block_length Block length (`"block"`) or mean block length
 #'   (`"stationary"`). Default: `ceiling(n^(1/3))`.
 #' @param burn_in Number of burn-in steps discarded when simulating a VAR.
+#' @param seed Optional random seed making the fit reproducible (see
+#'   [fit_synthesizer()]).
 #' @param ... Passed to [fit_synthesizer.data.frame()] when `method = "iid"`.
 #'
 #' @return An object of class `sp_ts_synthesizer`. Use [generate()] to draw
@@ -58,7 +60,12 @@
 fit_synthesizer.ts <- function(data,
                                method = c("copula_var", "block", "stationary", "iid"),
                                max_lag = 10L, order = NULL, block_length = NULL,
-                               burn_in = 100L, ...) {
+                               burn_in = 100L, seed = NULL, ...) {
+  if (!is.null(seed)) {
+    return(.with_seed(seed, fit_synthesizer.ts(
+      data, method = method, max_lag = max_lag, order = order,
+      block_length = block_length, burn_in = burn_in, seed = NULL, ...)))
+  }
   method <- match.arg(method)
   max_lag <- .check_count(max_lag, "max_lag")
   if (!is.null(order)) order <- .check_count(order, "order")

@@ -63,6 +63,11 @@ head(syn)
 than the training data. The `seed` argument makes the output reproducible
 *without* changing the random-number state of your session.
 
+Fitting is itself slightly random (ties among the pseudo-observations are
+broken at random, and discrete variables use a randomised transform), so for
+a fully reproducible workflow give the fit a seed too:
+`fit_synthesizer(mtcars, seed = 1)`.
+
 For a quick one-off, `synthesize()` fits and generates in one call, and can
 write the result straight to a file:
 

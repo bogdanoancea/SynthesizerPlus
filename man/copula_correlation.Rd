@@ -40,10 +40,12 @@ pairwise estimate is based; \code{summary()} returns a table describing how
 each column is modelled.
 }
 \details{
-Pairs of variables observed together in fewer than 3 rows have an
-\emph{unidentified} correlation. It is not estimated from data but filled in by
-the maximum-determinant completion (see the "Estimation details" section
-of \code{\link[=fit_synthesizer]{fit_synthesizer()}}); such entries have \code{n_pair < 3}.
+A pairwise correlation is treated as \emph{unidentified} when the two variables
+are observed together in fewer than 3 rows, or when its estimate is not
+finite (a numerical safeguard). Such
+entries are not estimated from data but completed as described in the
+"Estimation details" section of \code{\link[=fit_synthesizer]{fit_synthesizer()}}; \code{n_pair} alone
+therefore does not identify all of them.
 }
 \examples{
 fit <- fit_synthesizer(airquality)

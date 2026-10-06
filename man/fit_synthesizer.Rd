@@ -20,6 +20,7 @@ fit_synthesizer(data, ...)
   knots = NULL,
   id_cols = NULL,
   pd_method = c("auto", "higham", "eigen", "none"),
+  seed = NULL,
   ...
 )
 
@@ -69,6 +70,13 @@ not modelled; synthetic data get fresh sequential identifiers.}
 \item{pd_method}{How to repair a correlation matrix that is not positive
 definite: \code{"auto"}/\code{"higham"} (nearest correlation matrix), \code{"eigen"}
 (eigenvalue flooring) or \code{"none"} (fail if not positive definite).}
+
+\item{seed}{Optional random seed for the fit. Fitting is stochastic
+(random tie-breaking and the randomised distributional transform used
+for the pseudo-observations, row subsampling for the \emph{t} copula), so a
+seed makes the fitted model reproducible when fitting and generation are
+separate steps. The global random number generator state is restored
+afterwards. (\code{\link[=synthesize]{synthesize()}} has its own \code{seed}, covering both steps.)}
 }
 \value{
 An object of class \code{sp_synthesizer}.
@@ -120,7 +128,8 @@ dependence structure is an approximation.
 
 \emph{Unidentified pairs.} If two variables are observed together in fewer than
 3 rows (e.g. questions from different survey modules), their correlation
-cannot be estimated (with 2 rows it is trivially \eqn{\pm 1}). Such
+cannot be estimated (with 2 rows it is trivially \eqn{\pm 1}); the same
+applies when the pairwise estimate is not finite. Such
 entries are not set to zero, which would assert independence and, through
 the projection, distort the identified entries. They are filled by the
 maximum-determinant positive-definite completion of the identified

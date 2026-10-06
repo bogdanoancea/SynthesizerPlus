@@ -57,6 +57,12 @@
 #' @param pd_method How to repair a correlation matrix that is not positive
 #'   definite: `"auto"`/`"higham"` (nearest correlation matrix), `"eigen"`
 #'   (eigenvalue flooring) or `"none"` (fail if not positive definite).
+#' @param seed Optional random seed for the fit. Fitting is stochastic
+#'   (random tie-breaking and the randomised distributional transform used
+#'   for the pseudo-observations, row subsampling for the *t* copula), so a
+#'   seed makes the fitted model reproducible when fitting and generation are
+#'   separate steps. The global random number generator state is restored
+#'   afterwards. ([synthesize()] has its own `seed`, covering both steps.)
 #' @param ... Further arguments passed to methods.
 #'
 #' @return An object of class `sp_synthesizer`.
@@ -81,7 +87,8 @@
 #'
 #' *Unidentified pairs.* If two variables are observed together in fewer than
 #' 3 rows (e.g. questions from different survey modules), their correlation
-#' cannot be estimated (with 2 rows it is trivially \eqn{\pm 1}). Such
+#' cannot be estimated (with 2 rows it is trivially \eqn{\pm 1}); the same
+#' applies when the pairwise estimate is not finite. Such
 #' entries are not set to zero, which would assert independence and, through
 #' the projection, distort the identified entries. They are filled by the
 #' maximum-determinant positive-definite completion of the identified
@@ -149,7 +156,17 @@ fit_synthesizer.data.frame <- function(data,
                                        knots = NULL,
                                        id_cols = NULL,
                                        pd_method = c("auto", "higham", "eigen", "none"),
-                                       ...) {
+                                       seed = NULL, ...) {
+  if (!is.null(seed)) {
+    # fitting is stochastic (random tie-breaking and the randomised
+    # distributional transform of the pseudo-observations, Kendall
+    # subsampling); a seed makes the fitted model reproducible
+    return(.with_seed(seed, fit_synthesizer.data.frame(
+      data, copula = copula, by = by, min_stratum_size = min_stratum_size,
+      missing = missing, interpolation = interpolation,
+      discrete_threshold = discrete_threshold, knots = knots, id_cols = id_cols,
+      pd_method = pd_method, seed = NULL, ...)))
+  }
   copula <- match.arg(copula)
   missing <- match.arg(missing)
   interpolation <- match.arg(interpolation)
@@ -225,9 +242,10 @@ fit_synthesizer.data.frame <- function(data,
       sprintf("were filled by maximum-determinant completion (set to 0 in %d model(s) where no completion exists)",
               sum(meth == "zero_fallback"))
     }
-    warning(sprintf(paste0("%d pair(s) of variables are observed together in fewer than 3 rows ",
-                           "(in %d of %d fitted model(s)); their copula correlations are not ",
-                           "identified and %s, before any positive-definiteness repair. ",
+    warning(sprintf(paste0("Up to %d pair(s) of variables per fitted model are observed together in ",
+                           "fewer than 3 rows or have a non-finite estimate (affecting %d of %d ",
+                           "fitted model(s)); their copula correlations are not identified and %s, ",
+                           "before any positive-definiteness repair. ",
                            "See copula_correlation(fit, what = \"n_pair\") and summary(fit)."),
                     max(n_unid), sum(n_unid > 0L), length(mods), how), call. = FALSE)
   }
@@ -598,10 +616,12 @@ simulate.sp_ts_synthesizer <- simulate.sp_synthesizer
 #' pairwise estimate is based; `summary()` returns a table describing how
 #' each column is modelled.
 #'
-#' Pairs of variables observed together in fewer than 3 rows have an
-#' *unidentified* correlation. It is not estimated from data but filled in by
-#' the maximum-determinant completion (see the "Estimation details" section
-#' of [fit_synthesizer()]); such entries have `n_pair < 3`.
+#' A pairwise correlation is treated as *unidentified* when the two variables
+#' are observed together in fewer than 3 rows, or when its estimate is not
+#' finite (a numerical safeguard). Such
+#' entries are not estimated from data but completed as described in the
+#' "Estimation details" section of [fit_synthesizer()]; `n_pair` alone
+#' therefore does not identify all of them.
 #'
 #' @param object A fitted `sp_synthesizer`.
 #' @param stratum Optional stratum label for stratified models (as shown by
@@ -687,7 +707,7 @@ print.summary.sp_synthesizer <- function(x, ...) {
   }
   cat(" | missing data:", x$settings$missing, "\n")
   if (isTRUE(x$unidentified > 0L)) {
-    cat(sprintf("Unidentified pairwise correlations: %d (%s)\n", x$unidentified,
+    cat(sprintf("Unidentified pairwise correlations (pooled model): %d (%s)\n", x$unidentified,
                 if (identical(x$completion, "zero_fallback")) {
                   "no consistent completion; set to 0"
                 } else {

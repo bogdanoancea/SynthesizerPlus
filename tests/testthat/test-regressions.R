@@ -532,3 +532,57 @@ test_that("mixed completion methods across strata are reported", {
   expect_warning(fit_synthesizer(d, by = "g", missing = "drop", min_stratum_size = 10),
                  "set to 0 in 1 model")
 })
+
+# ---- 0.2.6: sixth external review -----------------------------------------
+
+test_that("the unidentified-pairs warning reports a per-model maximum", {
+  d <- split_modules(n = 400)
+  d$g <- rep(c("a", "b"), times = 200)
+  w <- testthat::capture_warnings(fit_synthesizer(d, by = "g", missing = "drop",
+                                                  min_stratum_size = 10))
+  w <- w[grepl("not identified", w)]
+  expect_length(w, 1L)
+  expect_match(w, "^Up to 1 pair\\(s\\) of variables per fitted model")
+  expect_match(w, "affecting 3 of 3 fitted model")
+})
+
+test_that("fit_synthesizer(seed = ) makes fitting reproducible", {
+  set.seed(1)
+  d <- data.frame(x = rnorm(3000), k = sample(1:4, 3000, TRUE),
+                  f = factor(sample(letters[1:3], 3000, TRUE)))
+  d$x[sample(3000, 300)] <- NA
+  for (cop in c("gaussian", "t")) {
+    f1 <- fit_synthesizer(d, copula = cop, seed = 42)
+    f2 <- fit_synthesizer(d, copula = cop, seed = 42)
+    expect_identical(copula_correlation(f1, include_missing = TRUE),
+                     copula_correlation(f2, include_missing = TRUE))
+    expect_identical(generate(f1, 50, seed = 1), generate(f2, 50, seed = 1))
+    f3 <- fit_synthesizer(d, copula = cop, seed = 43)
+    expect_false(identical(copula_correlation(f1), copula_correlation(f3)))
+  }
+  # the global RNG state is restored
+  set.seed(7); a <- runif(1)
+  set.seed(7); fit_synthesizer(d, seed = 99); b <- runif(1)
+  expect_identical(a, b)
+  # forwarded by the matrix, vector and stratified paths
+  m <- as.matrix(iris[1:4])
+  expect_identical(copula_correlation(fit_synthesizer(m, seed = 3)),
+                   copula_correlation(fit_synthesizer(m, seed = 3)))
+  expect_identical(fit_synthesizer(iris$Sepal.Length, seed = 3)$pooled,
+                   fit_synthesizer(iris$Sepal.Length, seed = 3)$pooled)
+  expect_identical(fit_synthesizer(iris, by = "Species", seed = 5)$strata,
+                   fit_synthesizer(iris, by = "Species", seed = 5)$strata)
+  expect_error(fit_synthesizer(iris, seed = NA), "seed")
+  expect_error(fit_synthesizer(iris, seed = "a"), "seed")
+})
+
+test_that("fit_synthesizer.ts(seed = ) is reproducible for every method", {
+  for (m in c("copula_var", "block", "stationary", "iid")) {
+    f1 <- fit_synthesizer(ldeaths, method = m, seed = 8)
+    f2 <- fit_synthesizer(ldeaths, method = m, seed = 8)
+    expect_identical(generate(f1, seed = 2), generate(f2, seed = 2))
+  }
+  set.seed(7); a <- runif(1)
+  set.seed(7); fit_synthesizer(ldeaths, seed = 1); b <- runif(1)
+  expect_identical(a, b)
+})
