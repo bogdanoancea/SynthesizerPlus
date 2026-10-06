@@ -219,9 +219,13 @@ fit_synthesizer.data.frame <- function(data,
   missing <- match.arg(missing)
   interpolation <- match.arg(interpolation)
   pd_method <- match.arg(pd_method)
+  dot_names <- names(list(...))
   .warn_unused_dots(list(...), "fit_synthesizer",
-                    if (any(c("closeness", "perturb", "dependence") %in% names(list(...)))) {
+                    if (any(c("closeness", "perturb", "dependence") %in% dot_names)) {
                       "'closeness', 'perturb' and 'dependence' are arguments of generate()."
+                    } else if (any(c("method", "max_lag", "order", "block_length", "burn_in") %in% dot_names)) {
+                      paste("Time-series arguments apply only to 'ts' objects; note that row",
+                            "subsetting such as x[1:100, ] drops the ts class (use window()).")
                     })
   data <- .as_plain_df(data)
   if (nrow(data) < 2L) stop("'data' must have at least 2 rows.", call. = FALSE)

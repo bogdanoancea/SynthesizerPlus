@@ -78,7 +78,9 @@ fit <- fit_synthesizer(ldeaths)
 syn <- generate(fit, seed = 1)
 plot_ts(ldeaths, syn)
 
-fit_mv <- fit_synthesizer(EuStockMarkets[1:500, ], method = "stationary")
+# window() keeps the ts class (row-subsetting with [1:500, ] would not)
+eu <- window(EuStockMarkets, end = time(EuStockMarkets)[500])
+fit_mv <- fit_synthesizer(eu, method = "stationary")
 head(generate(fit_mv, n = 100, seed = 1))
 }
 \references{

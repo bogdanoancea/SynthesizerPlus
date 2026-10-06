@@ -7,6 +7,11 @@
   The instant is now preserved with every 'writexl' version and with
   'openxlsx'. `?write_data` documents how each format stores date-times.
 * `inst/CITATION` and `CITATION.cff` give the Zenodo DOI.
+* The multivariate example in `?fit_synthesizer.ts` selected rows with
+  `EuStockMarkets[1:500, ]`, which returns a matrix rather than a `ts`, so the
+  stationary bootstrap was never used and a warning was printed; it now uses
+  `window()`. Passing time-series arguments (`method`, `order`, ...) for a
+  non-`ts` input now gives a warning that explains the cause.
 
 # SynthesizerPlus 0.2.8
 

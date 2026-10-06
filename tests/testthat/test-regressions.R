@@ -696,3 +696,13 @@ test_that("a discrete margin with one category on the joint rows is unidentified
 test_that("unused arguments of fit_synthesizer.ts() are reported", {
   expect_warning(fit_synthesizer(ldeaths, closeness = 0.5), "Closeness control is not available")
 })
+
+test_that("time-series arguments on a non-ts input explain the ts class loss", {
+  m <- EuStockMarkets[1:200, ]                      # a matrix, no longer a ts
+  expect_false(is.ts(m))
+  expect_warning(fit_synthesizer(m, method = "stationary"), "drops the ts class")
+  eu <- window(EuStockMarkets, end = time(EuStockMarkets)[200])
+  expect_true(is.ts(eu))
+  expect_silent(fit <- fit_synthesizer(eu, method = "stationary", seed = 1))
+  expect_identical(fit$method, "stationary")
+})
