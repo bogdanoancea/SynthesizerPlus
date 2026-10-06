@@ -1,5 +1,7 @@
 # SynthesizerPlus
 
+[![DOI](https://zenodo.org/badge/1405547507.svg)](https://doi.org/10.5281/zenodo.23193076)
+
 Synthetic data generation for R with copulas, built-in quality and
 disclosure-risk evaluation, ggplot2 visualisation and multi-format I/O.
 
