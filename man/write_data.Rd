@@ -42,6 +42,13 @@ HDF5 files are written with one dataset per column inside a group
 (\code{dataset}, default \code{"data"}), with attributes that record column order,
 factor levels, \code{Date}/\code{POSIXct} classes, time zones and missing strings,
 so that \code{\link[=read_data]{read_data()}} restores the original column types.
+
+Date-times (\code{POSIXct}) keep their instant in every format. Text formats
+(CSV, TSV, JSON, NDJSON) store them as ISO 8601 strings in UTC; Excel,
+SPSS, Stata and SAS files, which store clock time without a time zone,
+receive the UTC clock time; Parquet, Feather, fst and HDF5 store the
+instant together with the time zone. Pass the original data as \code{template}
+to \code{\link[=read_data]{read_data()}} to restore the original time zone.
 }
 \examples{
 f <- tempfile(fileext = ".tsv.gz")

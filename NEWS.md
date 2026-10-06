@@ -1,3 +1,13 @@
+# SynthesizerPlus 0.2.9
+
+* Excel files: date-times are now written as UTC clock time. 'writexl' 2.0
+  writes local wall-clock time instead of UTC, while 'readxl' reads Excel
+  date-times as UTC, so round trips through `write_data()`/`read_data()` were
+  shifted by the time-zone offset (e.g. 2 or 3 hours for Europe/Bucharest).
+  The instant is now preserved with every 'writexl' version and with
+  'openxlsx'. `?write_data` documents how each format stores date-times.
+* `inst/CITATION` and `CITATION.cff` give the Zenodo DOI.
+
 # SynthesizerPlus 0.2.8
 
 * DESCRIPTION: the Description now states how discrete and categorical

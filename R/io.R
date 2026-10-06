@@ -298,6 +298,13 @@ read_data <- function(path, format = NULL, template = NULL, object = NULL,
 #' factor levels, `Date`/`POSIXct` classes, time zones and missing strings,
 #' so that [read_data()] restores the original column types.
 #'
+#' Date-times (`POSIXct`) keep their instant in every format. Text formats
+#' (CSV, TSV, JSON, NDJSON) store them as ISO 8601 strings in UTC; Excel,
+#' SPSS, Stata and SAS files, which store clock time without a time zone,
+#' receive the UTC clock time; Parquet, Feather, fst and HDF5 store the
+#' instant together with the time zone. Pass the original data as `template`
+#' to [read_data()] to restore the original time zone.
+#'
 #' @param x A data frame (matrices are converted).
 #' @param path Output file path.
 #' @param format Optional format name or extension.
@@ -349,6 +356,9 @@ write_data <- function(x, path, format = NULL, overwrite = TRUE,
       if (tolower(tools::file_ext(path)) == "xls") {
         stop("Writing legacy .xls files is not supported; use .xlsx.", call. = FALSE)
       }
+      # Excel stores clock time without a zone and readxl reads it as UTC;
+      # writexl >= 2.0 writes local wall-clock time, so write UTC explicitly
+      x <- .posix_to_utc(x)
       if (requireNamespace("writexl", quietly = TRUE)) {
         writexl::write_xlsx(x, path, ...)
       } else if (requireNamespace("openxlsx", quietly = TRUE)) {
@@ -433,13 +443,20 @@ write_data <- function(x, path, format = NULL, overwrite = TRUE,
   new
 }
 
+# Formats that store clock time without a time zone (Excel, SPSS, Stata,
+# SAS) are written in UTC; the instant is unchanged, only the zone label.
+.posix_to_utc <- function(x) {
+  for (nm in names(x)) {
+    if (inherits(x[[nm]], "POSIXct")) attr(x[[nm]], "tzone") <- "UTC"
+  }
+  x
+}
+
 .write_haven <- function(x, path, kind, ...) {
   .require("haven", "to write SPSS/Stata/SAS transport files")
+  x <- .posix_to_utc(x)
   for (nm in names(x)) {
-    v <- x[[nm]]
-    # these formats store clock time without zone: write UTC
-    if (inherits(v, "POSIXct")) attr(x[[nm]], "tzone") <- "UTC"
-    if (is.logical(v)) x[[nm]] <- as.integer(v)
+    if (is.logical(x[[nm]])) x[[nm]] <- as.integer(x[[nm]])
   }
   if (kind == "stata") names(x) <- .stata_names(names(x))
   switch(kind,

@@ -21,7 +21,7 @@ authors:
     given-names: Bogdan
     affiliation: University of Bucharest
     orcid: "https://orcid.org/0000-0001-6987-5137"
-version: 0.2.8
+version: 0.2.9
 doi: 10.5281/zenodo.23193076
 identifiers:
   - type: doi
