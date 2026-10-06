@@ -1,0 +1,38 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata from this file."
+type: software
+title: "SynthesizerPlus: Synthetic Data Generation with Copulas, Evaluation and Multi-Format I/O"
+abstract: >-
+  An R package that generates synthetic versions of numeric, categorical,
+  mixed-type and time-series data. Marginal distributions are modelled with
+  interpolated empirical quantile functions and dependence with Gaussian or
+  Student-t copulas; discrete and categorical variables enter through the
+  distributional transform with maximum-likelihood (polychoric and polyserial)
+  latent correlations, and missing values through missingness indicators in
+  the copula. A closeness parameter, calibrated to a target distance or
+  disclosure-risk level, controls how far the synthetic data move away from
+  the real data. Fidelity, utility and disclosure risk are assessed with
+  distributional distances, propensity-score mean squared error,
+  confidence-interval overlap, correct attribution probability and distance
+  to closest record. Data can be read from and written to CSV, Parquet,
+  Feather, HDF5, JSON, Excel, SPSS, Stata, SAS and fst files.
+authors:
+  - family-names: Oancea
+    given-names: Bogdan
+    affiliation: University of Bucharest
+    orcid: "https://orcid.org/0000-0001-6987-5137"
+version: 0.2.8
+license: EUPL-1.2
+repository-code: "https://github.com/bogdanoancea/SynthesizerPlus"
+url: "https://github.com/bogdanoancea/SynthesizerPlus"
+keywords:
+  - synthetic data
+  - statistical disclosure control
+  - privacy
+  - official statistics
+  - copula
+  - missing data
+  - data augmentation
+  - machine learning
+  - time series
+  - R
