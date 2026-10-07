@@ -107,7 +107,7 @@ Statistical validation, and the bias it uncovered.
 
 # SynthesizerPlus 0.2.6
 
-Fixes from a sixth code review.
+Bugs fixed.
 
 * New `seed` argument in `fit_synthesizer()` (data frame, matrix, vector and
   `ts` methods). Fitting is stochastic (random tie-breaking, the randomised
@@ -125,7 +125,7 @@ Fixes from a sixth code review.
 
 # SynthesizerPlus 0.2.5
 
-Fixes from a fifth code review.
+Bugs fixed.
 
 * t copula: the pairwise counts (`n_pair`) and the identification of
   pairwise correlations were computed on the random 2000-row subsample used
@@ -150,7 +150,7 @@ Fixes from a fifth code review.
 
 # SynthesizerPlus 0.2.4
 
-Fixes from a fourth code review.
+Bugs fixed.
 
 * Unidentified copula correlations. A pair of variables observed together
   in fewer than 3 rows (e.g. questions from different survey modules) used
@@ -175,8 +175,7 @@ Fixes from a fourth code review.
 
 # SynthesizerPlus 0.2.3
 
-Fixes from a third code review (robustness and transparency; no change to
-the synthesis model).
+Bugs fixed.
 
 * Covariance and scale matrices passed to `r_mvnorm()`, `r_mvt()`,
   `r_mvlnorm()`, `r_mvskewnorm()` and `r_mvmixture()` are validated by one
@@ -208,7 +207,7 @@ the synthesis model).
 
 # SynthesizerPlus 0.2.2
 
-Fixes from a second code review.
+Bugs fixed.
 
 * Argument validation: `r_dirichlet()` requires finite positive `alpha`;
   `make_corr()` requires finite numeric `rho`; `disclosure_risk()` requires a
@@ -230,7 +229,7 @@ Fixes from a second code review.
 
 # SynthesizerPlus 0.2.1
 
-Fixes from an external code review.
+Bugs fixed. 
 
 * `r_copula()` and `r_mvdist()` now require `corr` to be a correlation
   matrix (square, symmetric, unit diagonal, entries in [-1, 1], positive
