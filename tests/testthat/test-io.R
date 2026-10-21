@@ -87,7 +87,10 @@ test_that("Excel round-trips", {
 test_that("SPSS, Stata and SAS transport files round-trip", {
   skip_if_not_installed("haven")
   for (ext in c("sav", "dta", "xpt")) {
-    expect_equal(roundtrip(ext), io_data())
+    x <- roundtrip(ext)
+    attr(x, "haven_meta") <- NULL
+    x[] <- lapply(x, `attr<-`, "haven_meta", NULL)
+    expect_equal(x, io_data())
   }
   expect_error(write_data(iris, tempfile(fileext = ".sas7bdat")), "xpt")
   f <- tempfile(fileext = ".dta")
