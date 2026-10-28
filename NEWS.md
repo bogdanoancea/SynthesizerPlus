@@ -1,3 +1,191 @@
+# SynthesizerPlus 0.4.0
+
+## Change in results for unordered categorical columns
+
+* Unordered factors and character columns are now placed on their latent
+  copula coordinate in a data-driven order (the first principal component of
+  each category's mean normal scores on the numeric, ordered and logical
+  columns), instead of the order of their labels. Synthetic data, fitted
+  correlations and closeness calibrations involving such columns therefore
+  differ from those of earlier versions with the same seed. Renaming or
+  reordering the categories no longer changes the fitted model, and
+  associations between a nominal column and the other columns are better
+  preserved. Ordered factors and logical columns keep their natural order;
+  results for data without unordered categorical columns are unchanged.
+
+## Conditional synthesis of one continuous response
+
+* `nonlinear_engine = "gam"` adds a penalised GAM (`mgcv`) alternative to the
+  CART conditional model, with optional tensor interactions
+  (`nonlinear_gam_interactions`) and local residual resampling
+  (`nonlinear_local_k`).
+* `nonlinear_engine = "auto"` selects CART, additive GAM or GAM with
+  interactions by training-only K-fold cross-validation
+  (`nonlinear_cv_folds`, `nonlinear_cv_rule`). Candidates are scored by the
+  continuous ranked probability score of their conditional predictive
+  distribution (`nonlinear_cv_score = "crps"`, default), which accounts for
+  the conditional spread as well as the conditional mean;
+  `nonlinear_cv_score = "mse"` scores the conditional mean only. Both scores
+  are stored in `fit$pooled$nonlinear$selection`.
+* `nonlinear_residual` (`"leaf"`, `"global"`, `"none"`) and
+  `nonlinear_calibration` (`"quantile"`, `"none"`) control the residual
+  generator and the marginal calibration of the response.
+* The quantile calibration now maps each generated value through a reference
+  distribution of conditional draws stored at fitting time, instead of
+  ranking the values generated in the same call. Results no longer depend on
+  the number of rows generated per call, chunk or stratum (previously a
+  single generated row always received the median response).
+* The CART model now encodes predictor categories from all training rows, so
+  a category that occurs only where the response is missing no longer stops
+  generation with an "unseen categorical predictor" error.
+* When a stratum has its own copula but too few observed responses for the
+  conditional model, `fit_synthesizer()` now warns and lists such strata in
+  `fit$strata$conditional_fallback`; `print()` reports them.
+
+## Nominal categorical response (experimental)
+
+* `nominal_target` generates one unordered factor, character or logical
+  response from a multinomial model (`nnet`) of its conditional
+  distribution given the copula-generated predictors. Numeric predictors
+  enter through natural cubic spline bases (`nominal_spline_df`, default 3),
+  so category probabilities can depend nonlinearly on them; the linear model
+  is fitted too and the one with the smaller AIC is used (`0` fits the
+  linear model only). The response is omitted from the predictor copula; its missingness
+  indicator stays in the joint missingness model. Mutually exclusive with
+  `nonlinear_target`. Strata without a converged model fall back to the
+  copula, with the same warning and record as above.
+* `nominal_decay` and `nominal_maxit` (default 1000 iterations) are passed
+  to `nnet::multinom()`.
+* `splines` (a base R package) is now imported.
+
+## Student-t copula fitting
+
+* The degrees-of-freedom profile log-likelihood is evaluated through a
+  Cholesky factor with common normalising terms cancelled. It is
+  algebraically equivalent to the previous likelihood and gives the same
+  estimates.
+* `t_profile = TRUE` records elapsed times of the fitting stages under
+  `fit$pooled$copula$profile`.
+
+## Tests
+
+* New tests cover the category order of unordered columns, the GAM and
+  automatic engines, the residual and calibration options, batch-size
+  independence of the calibration, categories seen only with a missing
+  response, conditional-model fallback in strata, CRPS selection, nonlinear
+  nominal dependence, and the t-copula likelihood.
+* The synthetic missingness-rate test now allows for binomial Monte Carlo
+  variation.
+
+# SynthesizerPlus 0.3.0
+
+## Experimental automatic conditional engine selection
+
+* Added optional `nonlinear_engine = "auto"` with training-only K-fold
+  selection among CART, additive GAM and GAM with numeric tensor
+  interactions. The default engine remains CART.
+* Added `nonlinear_cv_folds` (default 5) and `nonlinear_cv_rule`
+  (`"one_se"` or `"min"`). Model-selection diagnostics, including per-fold
+  MSE and candidate failures, are saved in the fitted nonlinear model.
+* Included regression tests. CV predictive loss is not a guarantee of
+  synthetic-data utility or privacy.
+
+
+## Experimental GAM conditional engine
+
+* Added optional `nonlinear_engine = "gam"` for one continuous hybrid target.
+  Numeric predictors enter through penalised cubic regression splines and
+  categorical predictors through factor effects. Tensor interactions may be
+  enabled explicitly with `nonlinear_gam_interactions = TRUE`.
+* For GAM, the existing `nonlinear_residual = "leaf"` option uses nearest
+  fitted-mean residual neighbours rather than tree leaves. CART, Gaussian
+  copula, and Student-t copula defaults and results are unaffected.
+* Added GAM tests. GAM fitting requires suggested package `mgcv`. This is experimental and no
+  superiority or privacy guarantee is claimed.
+
+
+## Controlled hybrid ablation (experimental)
+
+* The optional hybrid model now supports `nonlinear_residual = "leaf"`,
+  `"global"`, or `"none"`, and `nonlinear_calibration = "quantile"` or
+  `"none"`. Defaults reproduce the original hybrid method. The six
+  combinations allow controlled study of stochastic residual resampling and
+  response marginal calibration without changing the public default.
+* Added reproducibility and input-validation tests. No superiority is claimed
+  before external replicated comparisons.
+
+## Experimental extension (source candidate)
+
+* Added optional `nonlinear_target` argument to `fit_synthesizer()` to generate
+  one continuous response from a CART conditional model while retaining
+  copula-based generation of predictors. Leaf-grouped residual resampling
+  and empirical quantile calibration are used to approximate the response
+  conditional distribution and preserve its marginal. The default copula
+  path is unchanged.
+* Added regression tests and an exploratory held-out nonlinear prediction
+  benchmark script. This feature requires the suggested `rpart` package.
+* The hybrid's final joint distribution is not an elliptical copula;
+  non-default closeness/dependence controls are not supported. Fitted trees
+  and residual pools contain training data information and are not
+  disclosure-safe model artifacts.
+
+
+## Bug fixes
+
+* Fixed a dependence on the declared `levels()` order of unordered factors
+  during marginal fitting and latent-copula synthesis. Permuting the levels
+  without changing observed labels no longer changes synthetic observations
+  when the fitting and generation seeds are held fixed.
+* Unordered factors now use a deterministic (radix-sorted) internal order of
+  observed category labels. Explicit ordering of `ordered` factors is
+  unchanged. Generated factors retain their original class and level
+  metadata, including unused levels.
+
+## Tests
+
+* Added regression tests for unordered-factor level permutation invariance,
+  preservation of original output factor metadata, and ordered-factor
+  behaviour.
+
+## Compatibility and limitations
+
+* No changes to the public function signatures. As the internal category
+  encoding has changed, fitted models involving unordered factors may give
+  different synthetic results from earlier package versions. Refit models
+  when moving from 0.2.x to 0.3.0.
+* The fix does not make one-dimensional latent intervals a fully nominal
+  statistical model. Changing the *labels* of nominal categories (rather
+  than reordering the same labels) can still change the fitted model.
+
+
+## Testing
+
+* Added regression tests verifying that reordering the levels
+  of unordered factors does not change synthetic observations
+  when random seeds and all other settings are identical.
+
+* Added checks for preservation of factor classes, original
+  level metadata, and ordered-factor behaviour.
+
+## Compatibility
+
+* Existing public function signatures remain unchanged.
+
+* Fitted models involving unordered factors may produce
+  different results compared with earlier releases because
+  of the corrected internal category ordering.
+
+* Users requiring the corrected behaviour should refit
+  models created with previous versions.
+
+## Known limitations
+
+* Nominal categories continue to be represented using
+  one-dimensional latent intervals. Although the correction
+  removes sensitivity to permutations of existing factor
+  levels, invariance to arbitrary relabelling of nominal
+  categories is not guaranteed.
+  
 # SynthesizerPlus 0.2.9
 
 * Excel files: date-times are now written as UTC clock time. 'writexl' 2.0

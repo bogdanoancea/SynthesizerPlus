@@ -18,15 +18,19 @@ kendall <- function(a, b) {
 }
 
 # Four variables with Gaussian-copula dependence (AR(1), rho = 0.6) and
-# gamma, Poisson, 4-category and log-normal margins
+# gamma, Poisson, 4-category ORDINAL and log-normal margins.
+# The four categories arise from successive thresholds of a latent Gaussian
+# variable: the order a < b < c < d is part of the DGP.  Use ordered(), not an
+# unordered factor, when testing recovery against the latent truth.
 mixed_design <- function(n, seed) {
   R <- make_corr(4, "ar1", 0.6)
   U <- r_copula(n, "gaussian", corr = R, seed = seed)
   list(R = R, data = data.frame(
     g = stats::qgamma(U[, 1], 2, 1),
     p = stats::qpois(U[, 2], 3),
-    c = factor(c("a", "b", "c", "d")[findInterval(U[, 3], c(0, 0.1, 0.4, 0.9, 1),
-                                                    rightmost.closed = TRUE)]),
+    c = ordered(c("a", "b", "c", "d")[findInterval(U[, 3], c(0, 0.1, 0.4, 0.9, 1),
+                                                     rightmost.closed = TRUE)],
+                levels = c("a", "b", "c", "d")),
     l = stats::qlnorm(U[, 4])
   ))
 }
@@ -174,4 +178,27 @@ test_that("validation (fast, also on CRAN): MAR missingness is not attenuated", 
   s <- generate(fit_synthesizer(d, seed = 1), 10000, seed = 2)
   # 0.2.6 reproduced only ~60% of this association
   expect_gt(cor(s$x, is.na(s$y)), 0.85 * cor(d$x, is.na(d$y)))
+})
+
+# This tests the limited nominal invariance promised by the 0.3.0 fix:
+# reordering the level metadata of the *same named categories* must not change
+# the internal intervals or dependence fit.  It does NOT test invariance to
+# renaming category labels, which the 1-D latent encoding does not guarantee.
+test_that("validation: nominal factor releveling does not change the model", {
+  skip_on_cran()
+  d <- mixed_design(1500, 31)$data
+  d$c <- factor(as.character(d$c), levels = c("a", "b", "c", "d"))
+  reordered <- d
+  reordered$c <- factor(as.character(d$c), levels = c("d", "b", "a", "c"))
+
+  fit_a <- fit_synthesizer(d, seed = 17)
+  fit_b <- fit_synthesizer(reordered, seed = 17)
+  expect_equal(copula_correlation(fit_a), copula_correlation(fit_b),
+               tolerance = 1e-10)
+
+  syn_a <- generate(fit_a, 2000, seed = 18)
+  syn_b <- generate(fit_b, 2000, seed = 18)
+  expect_identical(as.character(syn_a$c), as.character(syn_b$c))
+  expect_identical(levels(syn_a$c), levels(d$c))
+  expect_identical(levels(syn_b$c), levels(reordered$c))
 })

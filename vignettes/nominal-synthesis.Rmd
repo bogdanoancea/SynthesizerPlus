@@ -1,0 +1,75 @@
+---
+title: "Nominal conditional synthesis (experimental)"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Nominal conditional synthesis (experimental)}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+The SynthesizerPlus copula uses a single latent coordinate per categorical
+variable. This is natural for ordinal responses. For unordered categories the
+copula places them on that coordinate in an order estimated from the data
+(by their association with the other columns), not in the order of their
+labels, but one coordinate cannot represent every pattern of association a
+nominal variable can have. Since version 0.4.0,
+`nominal_target` instead fits a *conditional multinomial logistic model* of one
+unordered response. The other columns are generated using the usual fitted
+copula, then the response is drawn from predicted category probabilities.
+The model is
+
+$$P(Y = k \mid x) = \frac{\exp\{\eta_k(x)\}}{\sum_l \exp\{\eta_l(x)\}},
+\qquad \eta_k(x) = \beta_{k0} + \sum_j f_{kj}(x_j),$$
+
+with $\eta$ of the first category fixed at zero. For each numeric predictor
+with at least five distinct values, $f_{kj}$ is a natural cubic spline with
+`nominal_spline_df` degrees of freedom (default 3, knots at quantiles of the
+training values), so the category probabilities can depend nonlinearly and
+non-monotonically on it; other predictors enter linearly or as category
+dummies, with a missingness indicator for numeric predictors. The model is
+fitted by `nnet::multinom()` with weight decay `nominal_decay`. The purely
+linear logit is fitted as well, and the model with the smaller AIC is used;
+the comparison is stored in `fit$pooled$nominal$selection` and the choice in
+`fit$pooled$nominal$spline_df`. Splines are thus used when the extra
+parameters are supported by the data; with (nearly) separated classes, as in
+`iris`, the linear logit is better determined and is kept. Setting
+`nominal_spline_df = 0` fits only the linear logit.
+
+```{r example, eval=requireNamespace("nnet", quietly=TRUE)}
+library(SynthesizerPlus)
+set.seed(204)
+input <- data.frame(
+  age = rnorm(500, 35, 10),
+  income = rgamma(500, shape = 4, scale = 1000)
+)
+logits <- cbind(0, (input$age - 35)/15, log(input$income/4000))
+p <- exp(logits - apply(logits, 1L, max))
+p <- p/rowSums(p)
+classes <- c("bus", "car", "rail")
+input$transport <- factor(classes[apply(p, 1, function(q)
+  sample.int(3, 1, prob = q))])
+
+fit <- fit_synthesizer(input, nominal_target = "transport", seed = 11)
+synthetic <- generate(fit, n = 500, seed = 12)
+prop.table(table(synthetic$transport))
+fit$pooled$nominal$selection   # AIC of the spline and linear models
+```
+
+Nominal category labels have no ordinal interpretation. Reordering or
+renaming those labels represents the same statistical outcome categories;
+the multinomial model is approximately equivariant to such relabelling (up to
+numerical optimisation and Monte Carlo variability). Reproducibility of the
+*factor-level metadata* is preserved by the generated table.
+
+At least 40 observed categorical responses and two to twenty distinct
+categories are required. Sparse strata fall back to the conventional copula
+model, including the nominal target; `fit_synthesizer()` warns when this
+happens and lists the strata in `fit$strata$conditional_fallback`. The
+multinomial model has additive spline effects of the numeric predictors and
+no interactions, so class boundaries that depend on interactions between
+predictors remain a limitation. Fitted model objects include information
+about the training data and should not be publicly released as if privacy-safe.

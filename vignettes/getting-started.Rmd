@@ -133,6 +133,35 @@ values are modelled as discrete, so a variable such as the number of
 cylinders only takes observed values. Continuous values are always within the
 observed range.
 
+### Order of unordered categories
+
+In the copula each categorical column occupies one latent coordinate, on
+which its categories are arranged in an order. Ordered factors keep their
+level order. For unordered factors and character columns the order is
+**estimated from the data**: categories are sorted by the first principal
+component of their mean normal scores on the numeric, ordered and logical
+columns, so categories that behave alike with respect to the other columns
+are neighbours on the latent coordinate (details in `?fit_synthesizer`). As a
+consequence the fitted model does not depend on the names or the level order
+of the categories:
+
+```{r}
+fit_iris <- fit_synthesizer(iris, seed = 1)
+fit_iris$pooled$marginals$Species$values   # estimated order
+
+iris2 <- iris
+iris2$Species <- factor(iris2$Species,
+                        levels = c("virginica", "setosa", "versicolor"))
+fit_iris2 <- fit_synthesizer(iris2, seed = 1)
+all.equal(fit_iris$pooled$copula$R, fit_iris2$pooled$copula$R)
+```
+
+(Versions before 0.4.0 used the order of the labels, so synthetic data
+involving unordered categorical columns differ from those of earlier versions.)
+One latent coordinate cannot represent every association of a nominal
+variable; when it matters, stratify on it (`by`, below) or, for one nominal
+response, use `nominal_target` (`vignette("nominal-synthesis")`).
+
 ## Missing values
 
 The default `missing = "joint"` reproduces the share of missing values and
@@ -226,6 +255,17 @@ fit_t <- fit_synthesizer(r, copula = "t")
 fit_t
 ```
 
+The degrees of freedom are chosen on a grid by maximising the copula
+likelihood with the correlation matrix held fixed. To see where the fitting
+time goes on large data, `t_profile = TRUE` records the elapsed time of each
+stage (correlation estimation, latent correlations of discrete columns,
+matrix repair and the degrees-of-freedom search):
+
+```{r}
+fit_tp <- fit_synthesizer(r, copula = "t", t_profile = TRUE)
+fit_tp$pooled$copula$profile
+```
+
 ## Identifiers, model size and privacy
 
 * Columns listed in `id_cols` are not modelled; synthetic records get fresh
@@ -257,3 +297,7 @@ sapply(sims, function(s) coef(lm(mpg ~ wt, data = s))[["wt"]])
   synthetic data — see `vignette("evaluating-synthetic-data")`.
 * `generate_to_file()` writes very large synthetic data sets in chunks to
   CSV, Parquet, HDF5 and other formats — see `vignette("file-formats")`.
+* When one response has a nonlinear relation to the other columns, it can be
+  generated from a conditional CART or GAM model on top of the copula — see
+  `vignette("hybrid-nonlinear")`; for one unordered categorical response, a
+  multinomial model — see `vignette("nominal-synthesis")`.

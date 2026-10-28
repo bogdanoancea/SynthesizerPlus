@@ -1,7 +1,7 @@
 Package: SynthesizerPlus
 Type: Package
 Title: Synthetic Data Generation with Copulas, Evaluation and Multi-Format I/O
-Version: 0.2.9
+Version: 0.4.0
 Authors@R:
     person("Bogdan", "Oancea", email = "bogdan.oancea@gmail.com",
            role = c("aut", "cre", "cph"))
@@ -18,7 +18,11 @@ Description: Generates synthetic versions of numeric, categorical, mixed-type
     missingness may depend on other variables. Supports stratified models,
     a closeness parameter with calibration to a target distance or
     disclosure-risk level, chunked generation of very large data sets,
-    copula vector-autoregressive and bootstrap time-series synthesis,
+    optional hybrid copula and conditional CART or GAM synthesis for
+    one continuous response (requiring 'rpart' or 'mgcv'), training-only
+    automatic selection of the conditional engine, experimental nominal
+    conditional synthesis of one unordered categorical response (requiring
+    'nnet'), copula vector-autoregressive and bootstrap time-series synthesis,
     augmentation of small training sets for machine learning, and random
     generation from multivariate distributions and elliptical and
     Archimedean copulas. Fidelity, utility and disclosure risk are assessed
@@ -33,10 +37,10 @@ Description: Generates synthetic versions of numeric, categorical, mixed-type
 License: EUPL (>= 1.2)
 URL: https://github.com/bogdanoancea/SynthesizerPlus
 BugReports: https://github.com/bogdanoancea/SynthesizerPlus/issues
-Depends:
-    R (>= 4.1.0)
+Depends: R (>= 4.1.0)
 Imports:
     ggplot2 (>= 3.4.0),
+    splines,
     stats,
     tools,
     utils
@@ -49,7 +53,9 @@ Suggests:
     jsonlite,
     knitr,
     MASS,
+    mgcv,
     nanoparquet,
+    nnet,
     openxlsx,
     readxl,
     rmarkdown,

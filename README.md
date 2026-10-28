@@ -14,6 +14,12 @@ univariate or multivariate time series.
 
 ## Installation
 
+Install the current CRAN release:
+
+```r
+install.packages("SynthesizerPlus")
+```
+
 ```r
 # development version
 remotes::install_github("bogdanoancea/SynthesizerPlus", build_vignettes = TRUE)
@@ -40,11 +46,58 @@ plot(cmp, type = "association")
 write_data(syn, "synthetic.parquet")               # deliver
 ```
 
+## Conditional synthesis of one target (experimental)
+
+The copula represents each variable by one latent coordinate and all
+dependence by correlations. When an analysis centres on **one response**
+whose relation to the other columns is nonlinear, or on an **unordered
+categorical** response, that response can instead be drawn from a
+conditional model given the copula-generated predictors:
+
+```r
+# continuous response: CART (default), penalised GAM, or automatic choice
+set.seed(1)
+d <- data.frame(x = runif(600, -2, 2), z = rnorm(600))
+d$y <- sin(3 * d$x) + 0.5 * d$z + rnorm(600, sd = 0.2 + 0.2 * abs(d$x))
+
+fit_cart <- fit_synthesizer(d, nonlinear_target = "y", seed = 10)
+fit_gam  <- fit_synthesizer(d, nonlinear_target = "y", nonlinear_engine = "gam", seed = 10)
+fit_auto <- fit_synthesizer(d, nonlinear_target = "y", nonlinear_engine = "auto", seed = 10)
+fit_auto$pooled$nonlinear$selection$scores   # cross-validated scores
+syn <- generate(fit_auto, n = 1000, seed = 11)
+
+# unordered categorical response: multinomial model with spline terms
+fit_nom <- fit_synthesizer(iris, nominal_target = "Species", seed = 42)
+syn_nom <- generate(fit_nom, n = 500, seed = 43)
+```
+
+* **Continuous response** (`nonlinear_target`, needs `rpart` or `mgcv`):
+  a CART or GAM conditional mean plus resampled residuals, calibrated to the
+  observed marginal of the response. `nonlinear_engine = "auto"` chooses
+  the engine by training-only cross-validation of the conditional
+  predictive distribution (CRPS).
+* **Unordered categorical response** (`nominal_target`, needs `nnet`): a
+  multinomial logit with natural-spline terms for numeric predictors (kept
+  when they improve the AIC over linear terms), so category probabilities
+  can depend nonlinearly on them.
+* Only one target per fit; non-default `closeness`, `dependence` and
+  `perturb` are not supported for such fits. Strata too small for the
+  conditional model fall back to their copula, with a warning.
+* The fitted conditional models contain training-data information and must
+  not be released as if privacy-safe. Cross-validated or held-out accuracy
+  does not certify synthetic-data quality or disclosure safety: use the
+  evaluation and disclosure-risk tools, and
+  `inst/examples/hybrid_nonlinear_benchmark.R` for paired comparisons on
+  held-out data.
+
+See `vignette("hybrid-nonlinear")` and `vignette("nominal-synthesis")`.
+
 ## Features
 
 | Area | Functions |
 |---|---|
 | Synthesis | `fit_synthesizer()`, `generate()`, `synthesize()`, `simulate()` |
+| Conditional synthesis (experimental) | `fit_synthesizer(nonlinear_target = , nonlinear_engine = "cart"/"gam"/"auto")`, `fit_synthesizer(nominal_target = )` |
 | Disclosure control | `disclosure_risk()` (replicated uniques, correct attribution probability), `dcr()`, simulated `census_sim` data |
 | Closeness control | `generate(closeness = )`, `perturbation()`, `calibrate_closeness()` |
 | ML data augmentation | `augment_data()`, `ts_windows()` |
@@ -82,6 +135,8 @@ source(ex("augmentation.R"), echo = TRUE)  # more training data for ML models
 * *Synthetic time series*
 * *Generating data from multivariate distributions*
 * *Reading and writing data: CSV, Parquet, HDF5 and more*
+* *Hybrid copula and conditional CART/GAM synthesis for nonlinear relationships* (experimental)
+* *Nominal conditional synthesis* (experimental)
 
 ## Acknowledgement
 

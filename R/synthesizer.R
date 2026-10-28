@@ -70,9 +70,159 @@
 #'   seed makes the fitted model reproducible when fitting and generation are
 #'   separate steps. The global random number generator state is restored
 #'   afterwards. ([synthesize()] has its own `seed`, covering both steps.)
+#' @param nonlinear_target Optional name of ONE continuous numeric response to
+#'   generate using a hybrid copula--conditional model. `NULL` (default)
+#'   leaves the existing copula synthesizer unchanged. The copula generates
+#'   all predictors; CART or a penalised GAM predicts the response, local
+#'   residuals can be resampled, and the response is quantile-calibrated to its
+#'   empirical marginal. Requires `rpart` for CART or `mgcv` for GAM. Not supported
+#'   for a `ts` model or a response with discrete/categorical marginals.
+#'   The fitted tree and residual pools contain training-data information;
+#'   do not release the fitted model as if it were privacy-safe.
+#' @param nominal_target Optional name of one unordered categorical response
+#'   (factor, character or logical). When supplied, predictors are generated
+#'   using the copula and this response is drawn from a fitted multinomial
+#'   conditional model (`nnet::multinom`). Nominal categories are not
+#'   thresholded along a one-dimensional latent variable in the final draw.
+#'   Mutually exclusive with `nonlinear_target`. Experimental, maximum of 20
+#'   observed categories and at least 40 observed responses; strata without a
+#'   converged model fall back to copula synthesis.
+#' @param nominal_decay Nonnegative weight-decay penalty passed to
+#'   `nnet::multinom()` (default `0.0001`).
+#' @param nominal_maxit Maximum number of optimisation iterations for the
+#'   nominal model (default 1000). A model that has not converged within
+#'   this limit is not used.
+#' @param nominal_spline_df Degrees of freedom of the natural cubic spline
+#'   basis used for each numeric predictor (with at least five distinct
+#'   values) in the nominal multinomial model, so category probabilities can
+#'   depend nonlinearly on numeric predictors. Default 3. The spline model
+#'   and the linear model are both fitted and the one with the smaller AIC
+#'   is used (recorded in `nominal$spline_df` and `nominal$selection`); `0`
+#'   fits the linear model only.
+#' @param t_profile If `TRUE` with `copula = "t"`, add exploratory elapsed-time
+#'   stage measurements under `fit$pooled$copula$profile` and per-stratum
+#'   copulas. Profile fields are absent by default.
+#' @param nonlinear_engine Conditional response model for `nonlinear_target`:
+#'   `"cart"` (default, unchanged), `"gam"` (penalised additive model
+#'   fitted by **mgcv**), or `"auto"` (experimental training-only K-fold
+#'   selection among CART, additive GAM and GAM with tensor interactions).
+#'   When `"auto"`, the fitted model records the selection scores in
+#'   `fit$pooled$nonlinear$selection` (and separately per fitted stratum).
+#'   The option is ignored when `nonlinear_target = NULL`.
+#' @param nonlinear_cv_folds Integer number of folds for automatic engine
+#'   selection, default 5 (2--10). Only non-missing target observations are
+#'   used for validation; predictors and target are held out together.
+#' @param nonlinear_cv_rule Either `"one_se"` (default: prefer CART, then
+#'   additive GAM, then interaction GAM when their average fold score falls
+#'   within one standard error of the best) or `"min"` (select the minimum
+#'   average fold score). All choices are made using original training
+#'   data only; no benchmark holdout observations are consulted.
+#' @param nonlinear_cv_score Criterion for automatic engine selection:
+#'   `"crps"` (default) scores the whole conditional predictive distribution
+#'   (fitted mean plus residual resampling, 50 draws per held-out row) by the
+#'   continuous ranked probability score, so a candidate that misrepresents
+#'   the conditional spread is penalised; `"mse"` scores only the conditional
+#'   mean by its squared prediction error. Both are reported in the
+#'   selection table.
+#' @param nonlinear_gam_k Maximum basis dimension per GAM smooth (default 10,
+#'   permitted 4--50), truncated when too few distinct covariate values occur.
+#' @param nonlinear_gam_interactions Whether to include pairwise tensor
+#'   interactions among up to three eligible numeric smooth predictors in the
+#'   GAM (default `FALSE`). An additive GAM may miss interactions.
+#' @param nonlinear_local_k Number of nearest training fitted values for
+#'   local GAM residual resampling (default 30). For `nonlinear_engine = "gam"`,
+#'   the existing residual mode `"leaf"` means this local fitted-mean
+#'   neighbourhood, since a GAM has no CART terminal leaves. This does not
+#'   necessarily reproduce variance changes orthogonal to the fitted mean.
+#' @param nonlinear_minbucket Minimum observations per CART leaf (default 20).
+#' @param nonlinear_cp Complexity penalty for CART splitting (default 0.001).
+#' @param nonlinear_maxdepth Maximum CART depth (default 10).
+#' @param nonlinear_residual Experimental residual resampling mode for a
+#'   hybrid `nonlinear_target`: `"leaf"` (default: CART leaf groups, or
+#'   GAM local neighbourhoods defined by fitted conditional means), `"global"` (resample from all fitted residuals),
+#'   or `"none"` (use only fitted conditional means). With `"none"`,
+#'   identical predictions are calibrated to the same value, so no artificial
+#'   within-leaf randomness is added.
+#' @param nonlinear_calibration Experimental marginal recalibration of the
+#'   hybrid response: `"quantile"` (default) maps each simulated value
+#'   through the empirical CDF of a reference sample of conditional draws,
+#'   stored at fitting time, and then through the observed response's
+#'   empirical quantile function. The result does not depend on how many
+#'   rows are generated per call, chunk or stratum. `"none"` uses raw
+#'   conditional draws, so its synthetic marginal need not equal the observed
+#'   response marginal and values can exceed its observed range.
 #' @param ... Further arguments passed to methods.
 #'
-#' @return An object of class `sp_synthesizer`.
+#' @return An object of class `sp_synthesizer`: a list whose main
+#'   components are `pooled` (the model fitted to all rows: `marginals`,
+#'   `copula` and, when requested, `nonlinear` or `nominal`), `strata`
+#'   (with `by`: stratum `keys`, `values`, `counts`, `probs`, per-stratum
+#'   `models`, `NULL` for strata smaller than `min_stratum_size`, and
+#'   `conditional_fallback`, a data frame of the strata whose own model has
+#'   no conditional model for the target), and `settings`.
+#'
+#'   With `nonlinear_engine = "auto"`, `pooled$nonlinear$selection` (and the
+#'   same element of each stratum model) holds the selected candidate
+#'   (`selected`, `engine`, `interactions`), the `reason` (`"cv"`, or a
+#'   fallback reason), `rule`, `score` (`"crps"` or `"mse"`), `folds`, a
+#'   `scores` table with per-candidate `mean_score`, `se_score`, `mean_mse`,
+#'   `se_mse` and any `issue`, and the per-fold matrices `fold_scores` and
+#'   `fold_mse`.
+#'
+#' @section Conditional models for one target:
+#' *Continuous response (`nonlinear_target`).* The copula generates all
+#' columns; the response is then replaced by a draw from a conditional model
+#' given the generated predictors. Predictors are encoded from all training
+#' rows (numeric columns median-imputed plus a missingness indicator;
+#' categories, at most 30, plus a `MISSING` level); a category never observed
+#' with the response is passed to the tree as unknown and routed by surrogate
+#' splits. CART (`rpart`) gives a piecewise-constant conditional mean
+#' \eqn{\hat m(x)}{m(x)} and, with residual mode `"leaf"`, residuals are resampled
+#' from the centred residuals of the same leaf. The GAM (`mgcv::gam`, REML,
+#' cubic regression splines for numeric predictors with at least four
+#' distinct values, `select = TRUE` so terms can be penalised to zero,
+#' optional pairwise `ti()` interactions among at most three of them)
+#' resamples centred residuals from the `nonlinear_local_k` training
+#' observations whose fitted means are nearest. Calibration `"quantile"`
+#' maps a raw draw \eqn{y^*} to \eqn{F_Y^{-1}(\tilde G(y^*))}{F_Y^{-1}(G(y*))}, where
+#' \eqn{F_Y^{-1}} is the empirical quantile function of the observed response
+#' and \eqn{\tilde G}{G} the mid-point empirical CDF of 20000 raw conditional
+#' draws for resampled training predictor rows, drawn once at fitting time
+#' from a fixed random stream. The synthetic response marginal therefore
+#' matches the observed one up to Monte Carlo error, independently of batch
+#' size.
+#'
+#' *Automatic engine selection.* CART, an additive GAM and a GAM with tensor
+#' interactions are compared by K-fold cross-validation on the training rows
+#' with an observed response. With `nonlinear_cv_score = "crps"` each
+#' held-out response \eqn{y} is scored by the continuous ranked probability
+#' score of \eqn{M = 50} conditional draws \eqn{X_1,\dots,X_M} from the
+#' fold model, \eqn{\frac1M\sum_i|X_i-y| - \frac1{2M^2}\sum_{i,j}|X_i-X_j|}{mean|X_i - y| - mean|X_i - X_j| / 2};
+#' with `"mse"` by \eqn{(y-\hat m(x))^2}{(y - m(x))^2}. A candidate failing in any fold is
+#' discarded. The `"one_se"` rule picks the simplest candidate (CART, then
+#' additive GAM, then interaction GAM) whose mean score is within one
+#' standard error of the best; the chosen engine is then refitted on all
+#' rows.
+#'
+#' *Unordered categorical response (`nominal_target`).* The response is
+#' removed from the copula (its missingness indicator stays) and drawn from
+#' a multinomial logit model (`nnet::multinom`, weight decay
+#' `nominal_decay`), \eqn{P(Y=k\mid x) \propto \exp(\beta_{k0} + \sum_j
+#' f_{kj}(x_j))}{P(Y = k | x) proportional to exp(b_k0 + sum_j f_kj(x_j))}, with \eqn{f_{kj}} a natural cubic spline with
+#' `nominal_spline_df` degrees of freedom (knots at quantiles) for each
+#' numeric predictor with at least five distinct values, and linear or
+#' dummy terms otherwise. The model with linear terms only is also fitted,
+#' and of the two converged models the one with the smaller AIC is used:
+#' splines are kept when the data support the extra parameters, while for
+#' (nearly) separated classes the better-determined linear logit is used.
+#' Category probabilities have no interactions between predictors.
+#'
+#' In a stratified fit, a stratum whose own model cannot fit the requested
+#' conditional model (too few observed responses, fewer than two categories,
+#' or no convergence) generates the target from its stratum copula; this is
+#' reported by a warning and in `strata$conditional_fallback`. The fitted
+#' conditional models contain training-data information and are not
+#' disclosure-safe artefacts.
 #'
 #' @section Estimation details:
 #' *Latent correlations.* For a pair of continuous variables the Gaussian
@@ -95,10 +245,28 @@
 #' correlation for a discrete-continuous pair (Olsson, Drasgow and Dorans,
 #' 1982) and the polychoric correlation for a discrete-discrete pair
 #' (Olsson, 1979), using the bivariate normal distribution function of Genz
-#' (2004). The t copula uses the same estimates for these pairs. Unordered
-#' categories enter in the order of their levels, which is also the order
-#' used when generating, so the estimate is the maximum likelihood estimate
-#' of the model actually fitted.
+#' (2004). The t copula uses the same estimates for these pairs.
+#'
+#' *Order of unordered categories.* A categorical variable occupies one
+#' latent coordinate, so its categories need an order on it. Ordered factors
+#' keep their level order and logical variables `FALSE < TRUE`. For unordered
+#' factors and character columns the order is estimated from the data (a
+#' form of optimal scaling): each numeric, ordered or logical column is
+#' converted to normal scores \eqn{\Phi^{-1}(r/(n+1))}{qnorm(r/(n+1))} from its ranks
+#' \eqn{r}; the matrix \eqn{M} of category means of these scores (one row
+#' per category) is centred with the category frequencies \eqn{w} as
+#' weights, and the categories are sorted by their scores on the first
+#' principal component of \eqn{\mathrm{diag}(\sqrt{w})M}{diag(sqrt(w)) M}, the sign fixed so
+#' that the first non-zero loading is positive, with ties broken by
+#' decreasing frequency and then by label. Categories that are adjacent in
+#' their association with the other columns are thus adjacent on the latent
+#' coordinate, and renaming or reordering the categories does not change the
+#' fitted model. Without informative reference columns, the declared level
+#' order (factors) or sorted labels (character) are used. The same order is
+#' used when generating, so the latent correlations are the maximum
+#' likelihood estimates of the model actually fitted. One coordinate cannot
+#' represent every association pattern of a nominal variable; see
+#' `nominal_target` and stratification (`by`).
 #'
 #' *Missing data.* All estimates use **pairwise complete observations**. The
 #' rows in which two variables are both observed may be a selected subset
@@ -204,6 +372,24 @@ fit_synthesizer.data.frame <- function(data,
                                        knots = NULL,
                                        id_cols = NULL,
                                        pd_method = c("auto", "higham", "eigen", "none"),
+                                       nonlinear_target = NULL,
+                                       nominal_target = NULL,
+                                       nominal_decay = 0.0001,
+                                       nominal_maxit = 1000L,
+                                       nominal_spline_df = 3L,
+                                       t_profile = FALSE,
+                                       nonlinear_engine = c("cart", "gam", "auto"),
+                                       nonlinear_cv_folds = 5L,
+                                       nonlinear_cv_rule = c("one_se", "min"),
+                                       nonlinear_cv_score = c("crps", "mse"),
+                                       nonlinear_gam_k = 10L,
+                                       nonlinear_gam_interactions = FALSE,
+                                       nonlinear_local_k = 30L,
+                                       nonlinear_minbucket = 20L,
+                                       nonlinear_cp = 0.001,
+                                       nonlinear_maxdepth = 10L,
+                                       nonlinear_residual = c("leaf", "global", "none"),
+                                       nonlinear_calibration = c("quantile", "none"),
                                        seed = NULL, ...) {
   if (!is.null(seed)) {
     # fitting is stochastic (random tie-breaking and the randomised
@@ -213,7 +399,21 @@ fit_synthesizer.data.frame <- function(data,
       data, copula = copula, by = by, min_stratum_size = min_stratum_size,
       missing = missing, interpolation = interpolation,
       discrete_threshold = discrete_threshold, knots = knots, id_cols = id_cols,
-      pd_method = pd_method, seed = NULL, ...)))
+      pd_method = pd_method, nonlinear_target = nonlinear_target,
+      nominal_target = nominal_target, nominal_decay = nominal_decay,
+      nominal_maxit = nominal_maxit, nominal_spline_df = nominal_spline_df,
+      t_profile = t_profile,
+      nonlinear_engine = nonlinear_engine,
+      nonlinear_cv_folds = nonlinear_cv_folds,
+      nonlinear_cv_rule = nonlinear_cv_rule,
+      nonlinear_cv_score = nonlinear_cv_score,
+      nonlinear_gam_k = nonlinear_gam_k,
+      nonlinear_gam_interactions = nonlinear_gam_interactions,
+      nonlinear_local_k = nonlinear_local_k,
+      nonlinear_minbucket = nonlinear_minbucket, nonlinear_cp = nonlinear_cp,
+      nonlinear_maxdepth = nonlinear_maxdepth,
+      nonlinear_residual = nonlinear_residual,
+      nonlinear_calibration = nonlinear_calibration, seed = NULL, ...)))
   }
   copula <- match.arg(copula)
   missing <- match.arg(missing)
@@ -238,6 +438,82 @@ fit_synthesizer.data.frame <- function(data,
   if (!is.null(knots)) knots <- .check_count(knots, "knots", allow_zero = FALSE)
   if (!is.null(knots) && knots < 2L) stop("'knots' must be at least 2.", call. = FALSE)
 
+  if (!is.logical(t_profile) || length(t_profile) != 1L || is.na(t_profile)) {
+    stop("'t_profile' must be TRUE or FALSE.", call. = FALSE)
+  }
+  if (!is.null(nominal_target)) {
+    if (!is.null(nonlinear_target)) {
+      stop("'nominal_target' and 'nonlinear_target' are currently mutually exclusive.",
+           call. = FALSE)
+    }
+    if (!is.character(nominal_target) || length(nominal_target) != 1L ||
+        is.na(nominal_target) || !nzchar(nominal_target)) {
+      stop("'nominal_target' must identify one categorical column.", call. = FALSE)
+    }
+    if (!requireNamespace("nnet", quietly = TRUE)) {
+      stop("'nominal_target' requires the suggested package 'nnet'.", call. = FALSE)
+    }
+    nominal_maxit <- .check_count(nominal_maxit, "nominal_maxit", allow_zero = FALSE)
+    nominal_spline_df <- .check_count(nominal_spline_df, "nominal_spline_df", allow_zero = TRUE)
+    if (nominal_spline_df == 1L || nominal_spline_df > 10L) {
+      stop("'nominal_spline_df' must be 0 (linear terms) or between 2 and 10.", call. = FALSE)
+    }
+    if (!is.numeric(nominal_decay) || length(nominal_decay) != 1L ||
+        !is.finite(nominal_decay) || nominal_decay < 0) {
+      stop("'nominal_decay' must be a nonnegative finite number.", call. = FALSE)
+    }
+  }
+  if (!is.null(nonlinear_target)) {
+    nonlinear_engine <- match.arg(nonlinear_engine)
+    nonlinear_cv_rule <- match.arg(nonlinear_cv_rule)
+    nonlinear_cv_score <- match.arg(nonlinear_cv_score)
+    nonlinear_cv_folds <- .check_count(nonlinear_cv_folds, "nonlinear_cv_folds",
+                                       allow_zero = FALSE)
+    if (nonlinear_cv_folds < 2L || nonlinear_cv_folds > 10L) {
+      stop("'nonlinear_cv_folds' must be between 2 and 10.", call. = FALSE)
+    }
+    nonlinear_residual <- match.arg(nonlinear_residual)
+    nonlinear_calibration <- match.arg(nonlinear_calibration)
+    if (!is.character(nonlinear_target) || length(nonlinear_target) != 1L ||
+        is.na(nonlinear_target) || !nzchar(nonlinear_target)) {
+      stop("'nonlinear_target' must be NULL or the name of one numeric response.", call. = FALSE)
+    }
+    conditional_packages <- if (nonlinear_engine == "gam") "mgcv" else "rpart"
+    if (!all(vapply(conditional_packages, requireNamespace, logical(1), quietly = TRUE))) {
+      stop("The hybrid nonlinear engine '", nonlinear_engine,
+           "' requires the suggested package '", conditional_packages[1L], "'.",
+           call. = FALSE)
+    }
+    if (nonlinear_engine == "auto" && !requireNamespace("mgcv", quietly = TRUE)) {
+      warning("Automatic engine selection: 'mgcv' is unavailable; evaluating CART only.",
+              call. = FALSE)
+    }
+    nonlinear_gam_k <- .check_count(nonlinear_gam_k, "nonlinear_gam_k",
+                                    allow_zero = FALSE)
+    if (nonlinear_gam_k < 4L || nonlinear_gam_k > 50L) {
+      stop("'nonlinear_gam_k' must be between 4 and 50.", call. = FALSE)
+    }
+    nonlinear_local_k <- .check_count(nonlinear_local_k, "nonlinear_local_k",
+                                      allow_zero = FALSE)
+    if (!is.logical(nonlinear_gam_interactions) ||
+        length(nonlinear_gam_interactions) != 1L ||
+        is.na(nonlinear_gam_interactions)) {
+      stop("'nonlinear_gam_interactions' must be TRUE or FALSE.", call. = FALSE)
+    }
+    nonlinear_minbucket <- .check_count(nonlinear_minbucket, "nonlinear_minbucket",
+                                         allow_zero = FALSE)
+    nonlinear_maxdepth <- .check_count(nonlinear_maxdepth, "nonlinear_maxdepth",
+                                       allow_zero = FALSE)
+    if (nonlinear_maxdepth > 30L) {
+      stop("'nonlinear_maxdepth' must be at most 30.", call. = FALSE)
+    }
+    if (!is.numeric(nonlinear_cp) || length(nonlinear_cp) != 1L ||
+        is.na(nonlinear_cp) || !is.finite(nonlinear_cp) ||
+        nonlinear_cp < 0 || nonlinear_cp > 1) {
+      stop("'nonlinear_cp' must be a finite number in [0, 1].", call. = FALSE)
+    }
+  }
+
   .check_cols(by, names(data), "by")
   .check_cols(id_cols, names(data), "id_cols")
   if (length(intersect(by, id_cols))) {
@@ -245,6 +521,33 @@ fit_synthesizer.data.frame <- function(data,
   }
   model_cols <- setdiff(names(data), c(by, id_cols))
   if (!length(model_cols)) stop("No columns left to model.", call. = FALSE)
+  if (!is.null(nominal_target)) {
+    if (!nominal_target %in% model_cols) {
+      stop("'nominal_target' must be a modelled column.", call. = FALSE)
+    }
+    if (!.value_class(data[[nominal_target]]) %in% c("factor", "character", "logical")) {
+      stop("'nominal_target' must be an unordered factor, character or logical column.",
+           call. = FALSE)
+    }
+    if (length(model_cols) < 2L) {
+      stop("Nominal conditional synthesis requires predictors.", call. = FALSE)
+    }
+  }
+  if (!is.null(nonlinear_target)) {
+    if (!nonlinear_target %in% model_cols) {
+      stop("'nonlinear_target' must name a modelled column (not 'by' or 'id_cols').",
+           call. = FALSE)
+    }
+    y <- data[[nonlinear_target]]
+    if (!is.double(y) || !identical(.value_class(y), "numeric") ||
+        any(!is.na(y) & !is.finite(y))) {
+      stop("'nonlinear_target' must be a finite, double-precision numeric column.",
+           call. = FALSE)
+    }
+    if (length(model_cols) < 2L) {
+      stop("Hybrid synthesis requires at least one predictor column.", call. = FALSE)
+    }
+  }
   bad <- model_cols[is.na(vapply(data[model_cols], .value_class, character(1)))]
   if (length(bad)) {
     stop("Unsupported column class in: ", paste(bad, collapse = ", "),
@@ -257,8 +560,49 @@ fit_synthesizer.data.frame <- function(data,
                    interpolation = interpolation,
                    discrete_threshold = discrete_threshold, knots = knots,
                    pd_method = pd_method)
+  if (isTRUE(t_profile) && copula == "t") settings$t_profile <- TRUE
+  if (!is.null(nominal_target)) {
+    settings$nominal_target <- nominal_target
+    settings$nominal_decay <- nominal_decay
+    settings$nominal_maxit <- nominal_maxit
+    settings$nominal_spline_df <- nominal_spline_df
+  }
+  # Preserve the original fitted-object schema when the option is not used.
+  if (!is.null(nonlinear_target)) {
+    settings$nonlinear_target <- nonlinear_target
+    settings$nonlinear_engine <- nonlinear_engine
+    if (identical(nonlinear_engine, "auto")) {
+      settings$nonlinear_cv_folds <- nonlinear_cv_folds
+      settings$nonlinear_cv_rule <- nonlinear_cv_rule
+      settings$nonlinear_cv_score <- nonlinear_cv_score
+    }
+    settings$nonlinear_gam_k <- nonlinear_gam_k
+    settings$nonlinear_gam_interactions <- nonlinear_gam_interactions
+    settings$nonlinear_local_k <- nonlinear_local_k
+    settings$nonlinear_minbucket <- nonlinear_minbucket
+    settings$nonlinear_cp <- nonlinear_cp
+    settings$nonlinear_maxdepth <- nonlinear_maxdepth
+    settings$nonlinear_residual <- nonlinear_residual
+    settings$nonlinear_calibration <- nonlinear_calibration
+  }
 
   pooled <- .fit_stratum(data[model_cols], settings)
+  if (!is.null(nonlinear_target) &&
+      pooled$marginals[[nonlinear_target]]$type != "continuous") {
+    stop("'nonlinear_target' must have a continuous empirical marginal.",
+         call. = FALSE)
+  }
+  if (!is.null(nominal_target) && is.null(pooled$nominal)) {
+    stop("Could not fit a converged nominal conditional model: require at least 40 ",
+         "observed responses, 2-20 categories, and a multinomial fit that converges ",
+         "within 'nominal_maxit' iterations (consider increasing it, or a smaller ",
+         "'nominal_spline_df').",
+         call. = FALSE)
+  }
+  if (!is.null(nonlinear_target) && is.null(pooled$nonlinear)) {
+    stop("Not enough observed target values to fit the nonlinear conditional model: ",
+         "at least max(10, 2 * nonlinear_minbucket) are required.", call. = FALSE)
+  }
 
   strata <- NULL
   if (length(by)) {
@@ -277,6 +621,23 @@ fit_synthesizer.data.frame <- function(data,
     strata <- list(keys = keys, values = values,
                    probs = counts / sum(counts),
                    counts = as.integer(counts), models = models)
+    # Strata with their own copula but without the requested conditional
+    # model fall back to the stratum copula for the target: record and say so.
+    cond <- if (!is.null(nonlinear_target)) "nonlinear" else if (!is.null(nominal_target)) "nominal"
+    if (!is.null(cond)) {
+      lacking <- vapply(models, function(m) !is.null(m) && is.null(m[[cond]]), logical(1))
+      fallback <- values[lacking, , drop = FALSE]
+      attr(fallback, "row.names") <- .set_row_names(nrow(fallback))
+      strata$conditional_fallback <- fallback
+      if (any(lacking)) {
+        warning(sprintf(paste0("The %s conditional model could not be fitted in %d of %d ",
+                               "stratum model(s) (too few observed target values or no ",
+                               "converged fit); the target is generated by the stratum copula ",
+                               "there. They are listed in 'fit$strata$conditional_fallback'."),
+                        cond, sum(lacking), sum(!vapply(models, is.null, logical(1)))),
+                call. = FALSE)
+      }
+    }
   }
 
   mods <- c(list(pooled), if (!is.null(strata)) strata$models)
@@ -383,8 +744,22 @@ fit_synthesizer.default <- function(data, ...) {
                   knots = settings$knots)
   })
   names(marg) <- names(df)
+  # categories of unordered categorical columns: data-driven latent order
+  marg <- .order_categories(marg, df)
 
+  # Fit before assembling copula coordinates: if multinomial optimisation is
+  # unavailable in a sparse stratum, retain the COMPLETE baseline copula,
+  # including the target. This is a true copula fallback, not independence.
+  nominal <- if (!is.null(settings$nominal_target)) .fit_nominal(df, settings) else NULL
+
+  # A conditionally generated nominal target is deliberately omitted from the
+  # latent copula: otherwise arbitrary category labels can still contaminate
+  # correlations among predictor columns through positive-definiteness repair.
+  # Its missingness indicator (if requested) remains in the joint copula.
   copula_marg <- marg[vapply(marg, function(m) m$type != "empty", logical(1))]
+  if (!is.null(nominal)) {
+    copula_marg[[settings$nominal_target]] <- NULL
+  }
   U <- lapply(names(copula_marg), function(nm) .pseudo_obs(copula_marg[[nm]], df[[nm]]))
   names(U) <- names(copula_marg)
 
@@ -424,9 +799,19 @@ fit_synthesizer.default <- function(data, ...) {
   }
   cop <- .fit_copula(Umat, family = settings$copula,
                      pd_method = settings$pd_method, cuts = cuts,
-                     fixed_zero = fixed_zero)
-  list(marginals = marg, missing_marginals = miss_marg, copula = cop,
-       n = nrow(df))
+                     fixed_zero = fixed_zero,
+                     profile = isTRUE(settings$t_profile))
+  hybrid <- if (!is.null(settings$nonlinear_target) &&
+                marg[[settings$nonlinear_target]]$type == "continuous") {
+    .fit_nonlinear(df, settings)
+  } else {
+    NULL
+  }
+  ans <- list(marginals = marg, missing_marginals = miss_marg,
+              copula = cop, n = nrow(df))
+  if (!is.null(settings$nominal_target)) ans$nominal <- nominal
+  if (!is.null(settings$nonlinear_target)) ans$nonlinear <- hybrid
+  ans
 }
 
 # Warning text about unidentified copula correlations across the fitted
@@ -480,6 +865,24 @@ fit_synthesizer.default <- function(data, ...) {
   }
   attr(out, "row.names") <- .set_row_names(n)
   class(out) <- "data.frame"
+  if (!is.null(model$nonlinear) && n > 0L) {
+    target <- model$nonlinear$target
+    target_missing <- is.na(out[[target]])
+    transformed <- .generate_nonlinear(model$nonlinear, out, marg[[target]])
+    out[[target]] <- .restore_class(transformed, marg[[target]], prototype[[target]])
+    if (marg[[target]]$na_rate > 0) {
+      # Keep the missingness indicator already drawn from the fitted copula.
+      # Save the target mask before replacing its simulated values.
+      out[[target]][target_missing] <- NA
+    }
+  }
+  if (!is.null(model$nominal) && n > 0L) {
+    target <- model$nominal$target
+    target_missing <- is.na(out[[target]])
+    sampled <- .generate_nominal(model$nominal, out)
+    out[[target]] <- .restore_class(sampled, marg[[target]], prototype[[target]])
+    if (marg[[target]]$na_rate > 0) out[[target]][target_missing] <- NA
+  }
   out
 }
 
@@ -516,6 +919,15 @@ fit_synthesizer.default <- function(data, ...) {
 #'   proportional to the training data).
 #' @param ... Further arguments passed to methods.
 #'
+#' @details
+#' For a fit with `nonlinear_target` or `nominal_target`, that one response is
+#' generated from its conditional model given the copula-generated
+#' predictors, rather than directly from the fitted copula. The fitted copula
+#' correlation is therefore a *baseline* model, not necessarily the final
+#' synthetic joint dependence. The missingness of the response still follows
+#' the copula. Non-default `dependence`, `closeness` and `perturb` are not
+#' supported for such fits.
+#'
 #' @return Synthetic data of the same type as the training data: a data
 #'   frame, matrix, vector or `ts` object.
 #'
@@ -542,6 +954,13 @@ generate.sp_synthesizer <- function(object, n = object$n_train, seed = NULL,
   dependence <- .check_prob(dependence, "dependence")
   closeness <- .check_prob(closeness, "closeness")
   stratum_sizes <- match.arg(stratum_sizes)
+  if ((!is.null(object$settings$nonlinear_target) ||
+       !is.null(object$settings$nominal_target)) &&
+      (dependence != 1 || closeness != 1 || !is.null(perturb))) {
+    stop("Conditional synthesis currently requires dependence = 1, ",
+         "closeness = 1 and perturb = NULL; these controls do not have ",
+         "the same interpretation after conditional synthesis.", call. = FALSE)
+  }
   pert <- .combine_perturbation(.closeness_perturbation(closeness), perturb)
   pert$dependence <- pert$dependence * dependence
   .check_pert_names(pert, object$model_cols, object$by, object$id_cols)
@@ -822,10 +1241,24 @@ print.sp_synthesizer <- function(x, ...) {
   cat("  copula     :", cop$family,
       if (is.finite(cop$df)) sprintf("(df = %g)", cop$df) else "", "\n")
   cat("  missing    :", x$settings$missing, "\n")
+  if (!is.null(x$settings$nonlinear_target)) {
+    cat("  nonlinear  :", toupper(x$settings$nonlinear_engine %||% "cart"),
+        "conditional target", x$settings$nonlinear_target, "\n")
+    cat("  options    : residual=", x$settings$nonlinear_residual %||% "leaf",
+        ", calibration=", x$settings$nonlinear_calibration %||% "quantile", "\n", sep = "")
+  }
+  if (!is.null(x$settings$nominal_target)) {
+    cat("  nominal    : multinomial conditional target", x$settings$nominal_target, "\n")
+  }
   if (!is.null(x$strata)) {
     own <- sum(!vapply(x$strata$models, is.null, logical(1)))
     cat(sprintf("  strata     : %d by %s (%d with own model)\n",
                 length(x$strata$keys), paste(x$by, collapse = " x "), own))
+    fb <- x$strata$conditional_fallback
+    if (!is.null(fb) && nrow(fb)) {
+      cat(sprintf("  fallback   : %d stratum model(s) generate the target by copula\n",
+                  nrow(fb)))
+    }
   }
   if (length(x$id_cols)) cat("  id columns :", paste(x$id_cols, collapse = ", "), "\n")
   invisible(x)

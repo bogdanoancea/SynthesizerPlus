@@ -20,6 +20,24 @@ fit_synthesizer(data, ...)
   knots = NULL,
   id_cols = NULL,
   pd_method = c("auto", "higham", "eigen", "none"),
+  nonlinear_target = NULL,
+  nominal_target = NULL,
+  nominal_decay = 1e-04,
+  nominal_maxit = 1000L,
+  nominal_spline_df = 3L,
+  t_profile = FALSE,
+  nonlinear_engine = c("cart", "gam", "auto"),
+  nonlinear_cv_folds = 5L,
+  nonlinear_cv_rule = c("one_se", "min"),
+  nonlinear_cv_score = c("crps", "mse"),
+  nonlinear_gam_k = 10L,
+  nonlinear_gam_interactions = FALSE,
+  nonlinear_local_k = 30L,
+  nonlinear_minbucket = 20L,
+  nonlinear_cp = 0.001,
+  nonlinear_maxdepth = 10L,
+  nonlinear_residual = c("leaf", "global", "none"),
+  nonlinear_calibration = c("quantile", "none"),
   seed = NULL,
   ...
 )
@@ -76,6 +94,105 @@ not modelled; synthetic data get fresh sequential identifiers.}
 definite: \code{"auto"}/\code{"higham"} (nearest correlation matrix), \code{"eigen"}
 (eigenvalue flooring) or \code{"none"} (fail if not positive definite).}
 
+\item{nonlinear_target}{Optional name of ONE continuous numeric response to
+generate using a hybrid copula--conditional model. \code{NULL} (default)
+leaves the existing copula synthesizer unchanged. The copula generates
+all predictors; CART or a penalised GAM predicts the response, local
+residuals can be resampled, and the response is quantile-calibrated to its
+empirical marginal. Requires \code{rpart} for CART or \code{mgcv} for GAM. Not supported
+for a \code{ts} model or a response with discrete/categorical marginals.
+The fitted tree and residual pools contain training-data information;
+do not release the fitted model as if it were privacy-safe.}
+
+\item{nominal_target}{Optional name of one unordered categorical response
+(factor, character or logical). When supplied, predictors are generated
+using the copula and this response is drawn from a fitted multinomial
+conditional model (\code{nnet::multinom}). Nominal categories are not
+thresholded along a one-dimensional latent variable in the final draw.
+Mutually exclusive with \code{nonlinear_target}. Experimental, maximum of 20
+observed categories and at least 40 observed responses; strata without a
+converged model fall back to copula synthesis.}
+
+\item{nominal_decay}{Nonnegative weight-decay penalty passed to
+\code{nnet::multinom()} (default \code{0.0001}).}
+
+\item{nominal_maxit}{Maximum number of optimisation iterations for the
+nominal model (default 1000). A model that has not converged within
+this limit is not used.}
+
+\item{nominal_spline_df}{Degrees of freedom of the natural cubic spline
+basis used for each numeric predictor (with at least five distinct
+values) in the nominal multinomial model, so category probabilities can
+depend nonlinearly on numeric predictors. Default 3. The spline model
+and the linear model are both fitted and the one with the smaller AIC
+is used (recorded in \code{nominal$spline_df} and \code{nominal$selection}); \code{0}
+fits the linear model only.}
+
+\item{t_profile}{If \code{TRUE} with \code{copula = "t"}, add exploratory elapsed-time
+stage measurements under \code{fit$pooled$copula$profile} and per-stratum
+copulas. Profile fields are absent by default.}
+
+\item{nonlinear_engine}{Conditional response model for \code{nonlinear_target}:
+\code{"cart"} (default, unchanged), \code{"gam"} (penalised additive model
+fitted by \strong{mgcv}), or \code{"auto"} (experimental training-only K-fold
+selection among CART, additive GAM and GAM with tensor interactions).
+When \code{"auto"}, the fitted model records the selection scores in
+\code{fit$pooled$nonlinear$selection} (and separately per fitted stratum).
+The option is ignored when \code{nonlinear_target = NULL}.}
+
+\item{nonlinear_cv_folds}{Integer number of folds for automatic engine
+selection, default 5 (2--10). Only non-missing target observations are
+used for validation; predictors and target are held out together.}
+
+\item{nonlinear_cv_rule}{Either \code{"one_se"} (default: prefer CART, then
+additive GAM, then interaction GAM when their average fold score falls
+within one standard error of the best) or \code{"min"} (select the minimum
+average fold score). All choices are made using original training
+data only; no benchmark holdout observations are consulted.}
+
+\item{nonlinear_cv_score}{Criterion for automatic engine selection:
+\code{"crps"} (default) scores the whole conditional predictive distribution
+(fitted mean plus residual resampling, 50 draws per held-out row) by the
+continuous ranked probability score, so a candidate that misrepresents
+the conditional spread is penalised; \code{"mse"} scores only the conditional
+mean by its squared prediction error. Both are reported in the
+selection table.}
+
+\item{nonlinear_gam_k}{Maximum basis dimension per GAM smooth (default 10,
+permitted 4--50), truncated when too few distinct covariate values occur.}
+
+\item{nonlinear_gam_interactions}{Whether to include pairwise tensor
+interactions among up to three eligible numeric smooth predictors in the
+GAM (default \code{FALSE}). An additive GAM may miss interactions.}
+
+\item{nonlinear_local_k}{Number of nearest training fitted values for
+local GAM residual resampling (default 30). For \code{nonlinear_engine = "gam"},
+the existing residual mode \code{"leaf"} means this local fitted-mean
+neighbourhood, since a GAM has no CART terminal leaves. This does not
+necessarily reproduce variance changes orthogonal to the fitted mean.}
+
+\item{nonlinear_minbucket}{Minimum observations per CART leaf (default 20).}
+
+\item{nonlinear_cp}{Complexity penalty for CART splitting (default 0.001).}
+
+\item{nonlinear_maxdepth}{Maximum CART depth (default 10).}
+
+\item{nonlinear_residual}{Experimental residual resampling mode for a
+hybrid \code{nonlinear_target}: \code{"leaf"} (default: CART leaf groups, or
+GAM local neighbourhoods defined by fitted conditional means), \code{"global"} (resample from all fitted residuals),
+or \code{"none"} (use only fitted conditional means). With \code{"none"},
+identical predictions are calibrated to the same value, so no artificial
+within-leaf randomness is added.}
+
+\item{nonlinear_calibration}{Experimental marginal recalibration of the
+hybrid response: \code{"quantile"} (default) maps each simulated value
+through the empirical CDF of a reference sample of conditional draws,
+stored at fitting time, and then through the observed response's
+empirical quantile function. The result does not depend on how many
+rows are generated per call, chunk or stratum. \code{"none"} uses raw
+conditional draws, so its synthetic marginal need not equal the observed
+response marginal and values can exceed its observed range.}
+
 \item{seed}{Optional random seed for the fit. Fitting is stochastic
 (random tie-breaking and the randomised distributional transform used
 for the pseudo-observations, row subsampling for the \emph{t} copula), so a
@@ -84,7 +201,21 @@ separate steps. The global random number generator state is restored
 afterwards. (\code{\link[=synthesize]{synthesize()}} has its own \code{seed}, covering both steps.)}
 }
 \value{
-An object of class \code{sp_synthesizer}.
+An object of class \code{sp_synthesizer}: a list whose main
+components are \code{pooled} (the model fitted to all rows: \code{marginals},
+\code{copula} and, when requested, \code{nonlinear} or \code{nominal}), \code{strata}
+(with \code{by}: stratum \code{keys}, \code{values}, \code{counts}, \code{probs}, per-stratum
+\code{models}, \code{NULL} for strata smaller than \code{min_stratum_size}, and
+\code{conditional_fallback}, a data frame of the strata whose own model has
+no conditional model for the target), and \code{settings}.
+
+With \code{nonlinear_engine = "auto"}, \code{pooled$nonlinear$selection} (and the
+same element of each stratum model) holds the selected candidate
+(\code{selected}, \code{engine}, \code{interactions}), the \code{reason} (\code{"cv"}, or a
+fallback reason), \code{rule}, \code{score} (\code{"crps"} or \code{"mse"}), \code{folds}, a
+\code{scores} table with per-candidate \code{mean_score}, \code{se_score}, \code{mean_mse},
+\code{se_mse} and any \code{issue}, and the per-fold matrices \code{fold_scores} and
+\code{fold_mse}.
 }
 \description{
 \code{fit_synthesizer()} learns a generative model from a data set. The model
@@ -114,6 +245,63 @@ groups, with a pooled fallback for small groups.
 Use \code{\link[=generate]{generate()}} to draw synthetic data from the fitted model, or
 \code{\link[=synthesize]{synthesize()}} to fit and generate in one step.
 }
+\section{Conditional models for one target}{
+
+\emph{Continuous response (\code{nonlinear_target}).} The copula generates all
+columns; the response is then replaced by a draw from a conditional model
+given the generated predictors. Predictors are encoded from all training
+rows (numeric columns median-imputed plus a missingness indicator;
+categories, at most 30, plus a \code{MISSING} level); a category never observed
+with the response is passed to the tree as unknown and routed by surrogate
+splits. CART (\code{rpart}) gives a piecewise-constant conditional mean
+\eqn{\hat m(x)}{m(x)} and, with residual mode \code{"leaf"}, residuals are resampled
+from the centred residuals of the same leaf. The GAM (\code{mgcv::gam}, REML,
+cubic regression splines for numeric predictors with at least four
+distinct values, \code{select = TRUE} so terms can be penalised to zero,
+optional pairwise \code{ti()} interactions among at most three of them)
+resamples centred residuals from the \code{nonlinear_local_k} training
+observations whose fitted means are nearest. Calibration \code{"quantile"}
+maps a raw draw \eqn{y^*} to \eqn{F_Y^{-1}(\tilde G(y^*))}{F_Y^{-1}(G(y*))}, where
+\eqn{F_Y^{-1}} is the empirical quantile function of the observed response
+and \eqn{\tilde G}{G} the mid-point empirical CDF of 20000 raw conditional
+draws for resampled training predictor rows, drawn once at fitting time
+from a fixed random stream. The synthetic response marginal therefore
+matches the observed one up to Monte Carlo error, independently of batch
+size.
+
+\emph{Automatic engine selection.} CART, an additive GAM and a GAM with tensor
+interactions are compared by K-fold cross-validation on the training rows
+with an observed response. With \code{nonlinear_cv_score = "crps"} each
+held-out response \eqn{y} is scored by the continuous ranked probability
+score of \eqn{M = 50} conditional draws \eqn{X_1,\dots,X_M} from the
+fold model, \eqn{\frac1M\sum_i|X_i-y| - \frac1{2M^2}\sum_{i,j}|X_i-X_j|}{mean|X_i - y| - mean|X_i - X_j| / 2};
+with \code{"mse"} by \eqn{(y-\hat m(x))^2}{(y - m(x))^2}. A candidate failing in any fold is
+discarded. The \code{"one_se"} rule picks the simplest candidate (CART, then
+additive GAM, then interaction GAM) whose mean score is within one
+standard error of the best; the chosen engine is then refitted on all
+rows.
+
+\emph{Unordered categorical response (\code{nominal_target}).} The response is
+removed from the copula (its missingness indicator stays) and drawn from
+a multinomial logit model (\code{nnet::multinom}, weight decay
+\code{nominal_decay}), \eqn{P(Y=k\mid x) \propto \exp(\beta_{k0} + \sum_j
+f_{kj}(x_j))}{P(Y = k | x) proportional to exp(b_k0 + sum_j f_kj(x_j))}, with \eqn{f_{kj}} a natural cubic spline with
+\code{nominal_spline_df} degrees of freedom (knots at quantiles) for each
+numeric predictor with at least five distinct values, and linear or
+dummy terms otherwise. The model with linear terms only is also fitted,
+and of the two converged models the one with the smaller AIC is used:
+splines are kept when the data support the extra parameters, while for
+(nearly) separated classes the better-determined linear logit is used.
+Category probabilities have no interactions between predictors.
+
+In a stratified fit, a stratum whose own model cannot fit the requested
+conditional model (too few observed responses, fewer than two categories,
+or no convergence) generates the target from its stratum copula; this is
+reported by a warning and in \code{strata$conditional_fallback}. The fitted
+conditional models contain training-data information and are not
+disclosure-safe artefacts.
+}
+
 \section{Estimation details}{
 
 \emph{Latent correlations.} For a pair of continuous variables the Gaussian
@@ -136,10 +324,28 @@ quantiles of the marginal cumulative probabilities: the polyserial
 correlation for a discrete-continuous pair (Olsson, Drasgow and Dorans,
 1982) and the polychoric correlation for a discrete-discrete pair
 (Olsson, 1979), using the bivariate normal distribution function of Genz
-(2004). The t copula uses the same estimates for these pairs. Unordered
-categories enter in the order of their levels, which is also the order
-used when generating, so the estimate is the maximum likelihood estimate
-of the model actually fitted.
+(2004). The t copula uses the same estimates for these pairs.
+
+\emph{Order of unordered categories.} A categorical variable occupies one
+latent coordinate, so its categories need an order on it. Ordered factors
+keep their level order and logical variables \code{FALSE < TRUE}. For unordered
+factors and character columns the order is estimated from the data (a
+form of optimal scaling): each numeric, ordered or logical column is
+converted to normal scores \eqn{\Phi^{-1}(r/(n+1))}{qnorm(r/(n+1))} from its ranks
+\eqn{r}; the matrix \eqn{M} of category means of these scores (one row
+per category) is centred with the category frequencies \eqn{w} as
+weights, and the categories are sorted by their scores on the first
+principal component of \eqn{\mathrm{diag}(\sqrt{w})M}{diag(sqrt(w)) M}, the sign fixed so
+that the first non-zero loading is positive, with ties broken by
+decreasing frequency and then by label. Categories that are adjacent in
+their association with the other columns are thus adjacent on the latent
+coordinate, and renaming or reordering the categories does not change the
+fitted model. Without informative reference columns, the declared level
+order (factors) or sorted labels (character) are used. The same order is
+used when generating, so the latent correlations are the maximum
+likelihood estimates of the model actually fitted. One coordinate cannot
+represent every association pattern of a nominal variable; see
+\code{nominal_target} and stratification (\code{by}).
 
 \emph{Missing data.} All estimates use \strong{pairwise complete observations}. The
 rows in which two variables are both observed may be a selected subset

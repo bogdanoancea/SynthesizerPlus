@@ -67,6 +67,15 @@ frame, matrix, vector or \code{ts} object.
 \code{sp_synthesizer} (see \code{\link[=fit_synthesizer]{fit_synthesizer()}}) or an \code{sp_ts_synthesizer} (see
 \code{\link[=fit_synthesizer.ts]{fit_synthesizer.ts()}}).
 }
+\details{
+For a fit with \code{nonlinear_target} or \code{nominal_target}, that one response is
+generated from its conditional model given the copula-generated
+predictors, rather than directly from the fitted copula. The fitted copula
+correlation is therefore a \emph{baseline} model, not necessarily the final
+synthetic joint dependence. The missingness of the response still follows
+the copula. Non-default \code{dependence}, \code{closeness} and \code{perturb} are not
+supported for such fits.
+}
 \examples{
 fit <- fit_synthesizer(mtcars)
 generate(fit, n = 5, seed = 42)

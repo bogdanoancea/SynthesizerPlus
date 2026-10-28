@@ -11,7 +11,10 @@ abstract: >-
   latent correlations, and missing values through missingness indicators in
   the copula. A closeness parameter, calibrated to a target distance or
   disclosure-risk level, controls how far the synthetic data move away from
-  the real data. Fidelity, utility and disclosure risk are assessed with
+  the real data. Optional conditional models (CART or penalised GAM for one
+  continuous response, a multinomial model for one nominal response) can
+  replace the copula for a single target variable. Fidelity, utility and
+  disclosure risk are assessed with
   distributional distances, propensity-score mean squared error,
   confidence-interval overlap, correct attribution probability and distance
   to closest record. Data can be read from and written to CSV, Parquet,
@@ -21,7 +24,7 @@ authors:
     given-names: Bogdan
     affiliation: University of Bucharest
     orcid: "https://orcid.org/0000-0001-6987-5137"
-version: 0.2.9
+version: 0.4.0
 doi: 10.5281/zenodo.23193076
 identifiers:
   - type: doi

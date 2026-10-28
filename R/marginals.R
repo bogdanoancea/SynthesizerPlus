@@ -33,10 +33,17 @@
   }
 
   if (.is_categorical_class(cls)) {
+    # Unordered factors and character columns are first coded in radix-sorted
+    # label order (locale independent); .fit_stratum() then re-orders their
+    # categories by the data (see .order_categories()), so that the coding
+    # depends neither on labels nor on the declared levels(). Ordered factors
+    # keep their declared order. Unobserved levels are excluded internally;
+    # .restore_class() restores the template's complete levels() vector.
     lev <- switch(cls,
-      factor = , ordered = levels(x),
+      factor = sort(unique(as.character(xo)), method = "radix"),
+      ordered = levels(x),
       logical = c("FALSE", "TRUE"),
-      character = sort(unique(xo))
+      character = sort(unique(xo), method = "radix")
     )
     counts <- tabulate(match(as.character(xo), lev), nbins = length(lev))
     out$type <- "categorical"
@@ -161,4 +168,86 @@ print.sp_marginal <- function(x, ...) {
   if (x$na_rate > 0) cat(sprintf(", %s missing", .fmt_pct(x$na_rate)))
   cat("\n")
   invisible(x)
+}
+
+# Data-driven category order for unordered categorical marginals ------------
+#
+# The copula represents a categorical variable by intervals on ONE latent
+# axis, so the order of the categories matters: an order that does not follow
+# the variable's association with the other variables attenuates that
+# association. For each unordered categorical column (factor or character)
+# the categories are ordered by their first principal-component score of the
+# category means of the other columns' normal scores ("optimal scaling" on
+# one dimension). Reference columns are the numeric, date-time, ordered and
+# logical columns; unordered categoricals are not used as references. The
+# order is invariant to the labels and to the declared levels(), uses no
+# random numbers, and is deterministic: the component's sign is fixed by its
+# loadings, and ties are broken by frequency and then by label. When no
+# reference column carries information, the declared level order (factors)
+# or the sorted labels (character) are kept.
+.order_categories <- function(marg, df) {
+  cand <- names(marg)[vapply(names(marg), function(nm) {
+    m <- marg[[nm]]
+    identical(m$type, "categorical") && m$class %in% c("factor", "character") &&
+      length(m$values) >= 2L
+  }, logical(1))]
+  if (!length(cand)) return(marg)
+  ref <- names(marg)[vapply(names(marg), function(nm) {
+    m <- marg[[nm]]
+    m$type %in% c("continuous", "discrete") ||
+      (identical(m$type, "categorical") && m$class %in% c("ordered", "logical"))
+  }, logical(1))]
+  scores <- lapply(ref, function(nm) {
+    x <- df[[nm]]
+    v <- if (is.factor(x)) as.numeric(as.integer(x)) else suppressWarnings(as.numeric(x))
+    ok <- !is.na(v)
+    z <- rep(NA_real_, length(v))
+    if (sum(ok) >= 3L && length(unique(v[ok])) > 1L) {
+      z[ok] <- stats::qnorm(rank(v[ok], ties.method = "average") / (sum(ok) + 1))
+    }
+    z
+  })
+  names(scores) <- ref
+  scores <- scores[vapply(scores, function(z) any(!is.na(z)), logical(1))]
+  for (nm in cand) {
+    m <- marg[[nm]]
+    lab <- as.character(df[[nm]])
+    if (is.factor(df[[nm]])) {
+      declared <- levels(df[[nm]])
+      fallback <- declared[declared %in% m$values]
+    } else {
+      fallback <- m$values
+    }
+    new_order <- fallback
+    if (length(scores)) {
+      # k x p matrix of category means of the reference normal scores
+      M <- vapply(scores, function(z) {
+        vapply(m$values, function(v) {
+          w <- !is.na(lab) & lab == v & !is.na(z)
+          if (any(w)) mean(z[w]) else NA_real_
+        }, numeric(1))
+      }, numeric(length(m$values)))
+      M <- matrix(M, nrow = length(m$values))
+      keep <- colSums(is.na(M)) == 0L
+      M <- M[, keep, drop = FALSE]
+      if (ncol(M) && any(abs(M) > 1e-12)) {
+        w <- m$probs
+        Mc <- sweep(M, 2L, colSums(M * w))          # frequency-weighted centring
+        sv <- svd(sqrt(w) * Mc, nu = 0L, nv = 1L)
+        v1 <- sv$v[, 1L]
+        v1 <- v1 * sign(v1[which.max(abs(v1) > 1e-12)])  # deterministic sign
+        sc <- drop(Mc %*% v1)
+        sc[abs(sc) < 1e-12] <- 0
+        if (any(sc != 0)) {
+          o <- order(sc, -m$probs, m$values, method = "radix")
+          new_order <- m$values[o]
+        }
+      }
+    }
+    idx <- match(new_order, m$values)
+    m$values <- m$values[idx]
+    m$probs <- m$probs[idx]
+    marg[[nm]] <- m
+  }
+  marg
 }

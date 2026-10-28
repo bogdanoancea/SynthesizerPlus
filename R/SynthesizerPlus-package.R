@@ -2,6 +2,10 @@
 #' @section Main functions:
 #' * Fitting and generation: [fit_synthesizer()], [generate()],
 #'   [synthesize()], [simulate.sp_synthesizer()], [generate_to_file()].
+#' * Conditional synthesis of one target (experimental): `nonlinear_target`
+#'   (CART, GAM or automatic choice) and `nominal_target` (multinomial) in
+#'   [fit_synthesizer()]; see `vignette("hybrid-nonlinear")` and
+#'   `vignette("nominal-synthesis")`.
 #' * Disclosure control: [disclosure_risk()], [dcr()], [census_sim] data.
 #' * Closeness to the real data: `closeness` in [generate()],
 #'   [perturbation()], [calibrate_closeness()].

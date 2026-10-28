@@ -17,7 +17,8 @@
                         pd_method = c("auto", "higham", "eigen", "none"),
                         df_grid = c(2, 3, 4, 5, 6, 8, 10, 15, 20, 30, 50, 100),
                         max_rows = 5000L, min_pair_obs = 3L, tau_rows = 2000L,
-                        cuts = NULL, fixed_zero = NULL) {
+                        cuts = NULL, fixed_zero = NULL, profile = FALSE) {
+  start_time <- if (isTRUE(profile) && family[1L] == "t") proc.time()[[3L]] else NULL
   family <- match.arg(family)
   pd_method <- match.arg(pd_method)
   d <- ncol(U)
@@ -41,6 +42,7 @@
   storage.mode(np) <- "integer"
   dimnames(np) <- list(nm, nm)
 
+  stage_start <- if (!is.null(start_time)) proc.time()[[3L]] else NULL
   if (family == "gaussian") {
     # Pairwise covariance of the normal scores, scaled by each variable's
     # standard deviation over *all* its observed values (not over the
@@ -61,6 +63,7 @@
     # observed values (exactly 1 with complete data)
     if (any(!obs)) R <- R * .range_factor(stats::qnorm(U), obs)
   }
+  tau_seconds <- if (!is.null(start_time)) proc.time()[[3L]] - stage_start else NULL
   if (is.null(fixed_zero)) fixed_zero <- matrix(FALSE, d, d)
   # a discrete margin with a single category carries no dependence: its
   # correlations are 0 by construction
@@ -82,6 +85,7 @@
       latent <- "polyserial_polychoric"
     }
   }
+  latent_seconds <- if (!is.null(start_time)) proc.time()[[3L]] - stage_start - tau_seconds else NULL
   R[fixed_zero] <- 0
   unid <- ((np < min_pair_obs) | !is.finite(R)) & !fixed_zero
   diag(unid) <- FALSE
@@ -99,6 +103,8 @@
   pd_adjustment <- max(abs(R - R_before))
   dimnames(R) <- list(nm, nm)
 
+  corr_seconds <- if (!is.null(start_time)) proc.time()[[3L]] - stage_start -
+    tau_seconds - latent_seconds else NULL
   df <- Inf
   df_estimated <- NA
   if (family == "t") {
@@ -106,14 +112,26 @@
     df <- est$df
     df_estimated <- est$estimated
   }
+  df_seconds <- if (!is.null(start_time)) proc.time()[[3L]] - stage_start -
+    tau_seconds - latent_seconds - corr_seconds else NULL
   ch <- tryCatch(chol(R), error = function(e) {
     stop("The copula correlation matrix is not positive definite (variables are ",
          "perfectly dependent). Use pd_method = \"auto\" to repair it.", call. = FALSE)
   })
-  list(family = family, R = R, df = df, df_estimated = df_estimated, chol = ch,
-       n_pair = np, unidentified = as.integer(sum(unid) / 2),
-       completion = completion, pd_adjustment = pd_adjustment,
-       latent = latent)
+  result <- list(family = family, R = R, df = df, df_estimated = df_estimated,
+                 chol = ch, n_pair = np, unidentified = as.integer(sum(unid) / 2),
+                 completion = completion, pd_adjustment = pd_adjustment,
+                 latent = latent)
+  if (!is.null(start_time)) {
+    result$profile <- c(kendall_seconds = tau_seconds,
+                        discrete_latent_seconds = latent_seconds,
+                        correlation_repair_seconds = corr_seconds,
+                        df_grid_seconds = df_seconds,
+                        other_seconds = proc.time()[[3L]] - start_time -
+                          tau_seconds - latent_seconds - corr_seconds - df_seconds,
+                        total_seconds = proc.time()[[3L]] - start_time)
+  }
+  result
 }
 
 # Range-restriction factor sd_i|j sd_j|i / (sd_i sd_j), where sd_i|j is the
@@ -250,15 +268,18 @@
   if (nrow(Uc) > max_rows) Uc <- Uc[sample.int(nrow(Uc), max_rows), , drop = FALSE]
   Uc <- pmin(pmax(Uc, 1e-10), 1 - 1e-10)
   d <- ncol(Uc)
-  Rinv <- solve(R)
-  logdet <- as.numeric(determinant(R, logarithm = TRUE)$modulus)
+  C <- chol(R)
+  inverse_chol <- backsolve(C, diag(d))
+  logdet <- 2 * sum(log(diag(C)))
   ll <- vapply(df_grid, function(nu) {
     X <- stats::qt(Uc, df = nu)
-    q <- rowSums((X %*% Rinv) * X)
-    lmv <- lgamma((nu + d) / 2) - lgamma(nu / 2) - d / 2 * log(nu * pi) -
-      0.5 * logdet - (nu + d) / 2 * log1p(q / nu)
-    lmarg <- rowSums(stats::dt(X, df = nu, log = TRUE))
-    sum(lmv - lmarg)
+    q <- rowSums((X %*% inverse_chol)^2)
+    # log c_t(u): the univariate and multivariate t normalising
+    # constants simplify algebraically; no d*n calls to dt() needed.
+    constant <- lgamma((nu + d) / 2) + (d - 1) * lgamma(nu / 2) -
+      d * lgamma((nu + 1) / 2) - 0.5 * logdet
+    nrow(X) * constant - (nu + d) / 2 * sum(log1p(q / nu)) +
+      (nu + 1) / 2 * sum(log1p(X^2 / nu))
   }, numeric(1))
   list(df = df_grid[which.max(ll)], estimated = TRUE)
 }
