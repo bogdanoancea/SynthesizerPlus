@@ -13,7 +13,9 @@ Description: Generates synthetic versions of numeric, categorical, mixed-type
     <doi:10.1016/j.jspi.2009.05.030>), and their latent correlations are
     estimated by maximum likelihood as polychoric (Olsson, 1979,
     <doi:10.1007/BF02296207>) and polyserial (Olsson, Drasgow and Dorans,
-    1982, <doi:10.1007/BF02294164>) correlations. Missing values are
+    1982, <doi:10.1007/BF02294164>) correlations. Unordered categories are
+    placed on their latent coordinate in an order estimated from their
+    association with the other variables. Missing values are
     modelled by missingness indicators inside the copula, so that
     missingness may depend on other variables. Supports stratified models,
     a closeness parameter with calibration to a target distance or

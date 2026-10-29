@@ -1,6 +1,6 @@
 ## Submission
 
-This is an update of SynthesizerPlus (previous submission: 0.2.8).
+This is an update of SynthesizerPlus 0.2.9, the version currently on CRAN.
 
 Main changes (see NEWS.md):
 
@@ -12,12 +12,13 @@ Main changes (see NEWS.md):
 * Unordered categorical columns are now placed on their latent copula
   coordinate in a data-driven order, so results for such columns differ from
   earlier versions; results for other data are unchanged.
-* An algebraically equivalent, faster evaluation of the Student-t copula
-  degrees-of-freedom likelihood.
+* The Student-t copula degrees-of-freedom likelihood is evaluated through a
+  Cholesky factor; it is algebraically equivalent and gives the same estimates.
 
 ## Test environments
 
 * Local: Ubuntu Linux, R 4.3.3, `R CMD check --as-cran`.
+* win-builder (R-devel): `devtools::check_win_devel()`.
 
 ## R CMD check results
 
