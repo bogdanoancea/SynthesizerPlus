@@ -170,7 +170,7 @@ read_data <- function(path, format = NULL, template = NULL, object = NULL,
     parquet = .read_parquet(path, ...),
     feather = {
       .require("arrow", "to read Feather/Arrow IPC files")
-      arrow::read_feather(path, ...)
+      .arrow_ipc("read")(path, ...)
     },
     hdf5 = .read_hdf5(path, dataset),
     json = {
@@ -341,7 +341,7 @@ write_data <- function(x, path, format = NULL, overwrite = TRUE,
     parquet = .write_parquet(x, path, ...),
     feather = {
       .require("arrow", "to write Feather/Arrow IPC files")
-      arrow::write_feather(x, path, ...)
+      .arrow_ipc("write")(x, path, ...)
     },
     hdf5 = .write_hdf5(x, path, dataset),
     json = {
@@ -766,4 +766,16 @@ generate_to_file <- function(object, n, path, format = NULL, chunk_size = 1e5,
 .canonical_ext <- function(format) {
   switch(format, rdata = "rda", feather = "feather", hdf5 = "h5", excel = "xlsx",
          spss = "sav", stata = "dta", format)
+}
+
+# Arrow IPC (Feather V2) reader/writer. 'arrow' has replaced read_feather()
+# and write_feather() by read_ipc_file() and write_ipc_file() and now warns
+# when the old names are used; the old names remain the fallback for arrow
+# versions that predate the new ones. Both write the same file format.
+.arrow_ipc <- function(direction = c("read", "write")) {
+  direction <- match.arg(direction)
+  new <- paste0(direction, "_ipc_file")
+  old <- paste0(direction, "_feather")
+  name <- if (new %in% getNamespaceExports("arrow")) new else old
+  getExportedValue("arrow", name)
 }

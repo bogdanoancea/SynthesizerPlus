@@ -83,6 +83,10 @@
   machine.
 * The SPSS/Stata/SAS round-trip test ignores the `haven_meta` attribute added
   by forthcoming versions of 'haven' (contributed by Hadley Wickham).
+* Feather/Arrow IPC files are read and written with `arrow::read_ipc_file()`
+  and `arrow::write_ipc_file()`, which replace the deprecated
+  `read_feather()` and `write_feather()` (used only with older 'arrow'
+  versions). This removes two deprecation warnings.
 
 # SynthesizerPlus 0.3.0
 
