@@ -22,12 +22,13 @@ error (relative tolerance 1e-8).
 
 ## Test environments
 
-* Local: Ubuntu Linux, R 4.3.3, `R CMD check --as-cran`.
-* win-builder (R-devel): `devtools::check_win_devel()`.
+* Local: macOS (Apple Silicon), R 4.6.x
+* win-builder: R-devel
+* R-hub: mkl, linux, macos-arm64
 
 ## R CMD check results
 
-0 errors | 0 warnings | 1 note
+0 errors ✔ | 0 warnings ✔ | 0 notes ✔
 
 * Packages suggested but not available for checking: 'arrow', 'fst',
   'nanoparquet'. This NOTE is specific to the local check machine, where these

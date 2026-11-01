@@ -67,6 +67,8 @@ export(supported_formats)
 export(synthesize)
 export(ts_windows)
 export(write_data)
-importFrom(ggplot2,.data)
-importFrom(ggplot2,autoplot)
+importFrom(ggplot2,
+  .data,
+  autoplot
+)
 importFrom(stats,simulate)

@@ -23,7 +23,7 @@ r_copula(
 
 \item{corr}{Correlation matrix for elliptical copulas (default:
 exchangeable with \code{rho = 0.5}). It must have a unit diagonal; a
-covariance matrix is rejected (convert it with \code{\link[stats:cor]{stats::cov2cor()}}).}
+covariance matrix is rejected (convert it with \code{\link[stats:cov2cor]{stats::cov2cor()}}).}
 
 \item{df}{Degrees of freedom for the \emph{t} copula: a positive number;
 \code{Inf} gives the Gaussian copula.}

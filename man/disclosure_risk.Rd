@@ -31,7 +31,7 @@ targets (default 0.1, i.e. 10 percent).}
 
 \item{abs_tolerance}{Absolute tolerance for numeric targets (default 0).
 A prediction is correct if \eqn{|\hat y - y| \le
-  \max(\mathrm{tolerance} \cdot |y|, \mathrm{abs\_tolerance})}. A purely
+\max(\mathrm{tolerance} \cdot |y|, \mathrm{abs\_tolerance})}. A purely
 relative tolerance is (essentially) zero for a true value of 0, so use
 \code{abs_tolerance} for targets with meaningful zeros (e.g. income of
 non-earners), in the units of the target.}

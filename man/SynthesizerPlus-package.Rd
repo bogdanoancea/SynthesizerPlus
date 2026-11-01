@@ -46,5 +46,10 @@ Useful links:
 \author{
 \strong{Maintainer}: Bogdan Oancea \email{bogdan.oancea@gmail.com} [copyright holder]
 
+Authors:
+\itemize{
+  \item Bogdan Oancea \email{bogdan.oancea@gmail.com} [copyright holder]
+}
+
 }
 \keyword{internal}
