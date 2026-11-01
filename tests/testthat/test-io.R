@@ -223,7 +223,7 @@ test_that("generate_to_file() is reproducible and matches chunked generation", {
   f2 <- tempfile(fileext = ".csv")
   generate_to_file(fit, 100, f1, chunk_size = 30, seed = 5)
   generate_to_file(fit, 100, f2, chunk_size = 30, seed = 5)
-  expect_identical(readLines(f1), readLines(f2))
+  expect_reproducible(read.csv(f1), read.csv(f2))
   unlink(c(f1, f2))
 })
 

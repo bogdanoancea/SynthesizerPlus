@@ -112,7 +112,7 @@ test_that("compare_synthetic() bundles all metrics", {
   only <- compare_synthetic(iris, syn, metrics = "marginal")
   expect_null(only$utility)
   expect_true(is.na(summary(only)$value[4]))
-  expect_identical(compare_synthetic(iris, syn, seed = 3)$utility,
+  expect_reproducible(compare_synthetic(iris, syn, seed = 3)$utility,
                    compare_synthetic(iris, syn, seed = 3)$utility)
 })
 

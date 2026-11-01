@@ -25,3 +25,11 @@ expect_near <- function(object, expected, tol) {
          sprintf("max |difference| = %.4g exceeds %.4g", diff, tol))
   invisible(object)
 }
+
+# Reproducibility of a seeded computation. Optimised BLAS/LAPACK libraries
+# (e.g. Intel MKL with several threads) need not return bit-identical results
+# for repeated identical computations, so two runs with the same seed are
+# compared up to rounding error rather than with identical().
+expect_reproducible <- function(object, expected, ...) {
+  expect_equal(object, expected, tolerance = 1e-8, ...)
+}

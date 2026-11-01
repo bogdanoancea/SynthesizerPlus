@@ -14,8 +14,8 @@ test_that("perturbation() validates and prints", {
 test_that("closeness = 1 and an empty perturbation reproduce the default output", {
   fit <- fit_synthesizer(iris)
   base <- generate(fit, seed = 1)
-  expect_identical(generate(fit, closeness = 1, seed = 1), base)
-  expect_identical(generate(fit, perturb = perturbation(), seed = 1), base)
+  expect_reproducible(generate(fit, closeness = 1, seed = 1), base)
+  expect_reproducible(generate(fit, perturb = perturbation(), seed = 1), base)
   expect_error(generate(fit, closeness = 1.5), "closeness")
   expect_error(generate(fit, perturb = list(noise = 1)), "perturbation")
   expect_error(generate(fit, perturb = perturbation(shift = c(zz = 1))), "not in the data")

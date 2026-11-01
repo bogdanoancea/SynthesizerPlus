@@ -3,7 +3,7 @@ test_that("hybrid is opt-in and the old default is unchanged", {
   d <- data.frame(x = rnorm(200), z = rnorm(200))
   f0 <- fit_synthesizer(d, seed = 11)
   f1 <- fit_synthesizer(d, nonlinear_target = NULL, seed = 11)
-  expect_identical(generate(f0, n = 50, seed = 12),
+  expect_reproducible(generate(f0, n = 50, seed = 12),
                    generate(f1, n = 50, seed = 12))
   expect_null(f0$pooled$nonlinear)
 })
@@ -20,7 +20,7 @@ test_that("hybrid CART generates reproducible numeric responses", {
   expect_identical(f$pooled$nonlinear$target, "y")
   a <- generate(f, n = 800, seed = 16)
   b <- generate(f, n = 800, seed = 16)
-  expect_identical(a, b)
+  expect_reproducible(a, b)
   expect_named(a, names(d))
   expect_true(all(is.finite(a$y)))
   expect_equal(nrow(a), 800L)
@@ -69,5 +69,5 @@ test_that("hybrid validates inputs and stratified models", {
   expect_equal(nrow(s), 300L)
   expect_true(all(s$k %in% c("A", "B")))
   expect_true(all(is.finite(s$y)))
-  expect_identical(generate(f, n = 300, seed = 13), s)
+  expect_reproducible(generate(f, n = 300, seed = 13), s)
 })

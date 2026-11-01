@@ -15,7 +15,7 @@ test_that("misspelled or misplaced arguments are reported", {
 test_that("closeness controls are rejected loudly for time series", {
   fit <- fit_synthesizer(ldeaths)
   expect_warning(s <- generate(fit, closeness = 0.5, seed = 1), "not supported for time-series")
-  expect_identical(s, generate(fit, seed = 1))
+  expect_reproducible(s, generate(fit, seed = 1))
   expect_warning(generate(fit, perturb = perturbation(noise = 1)), "not supported")
   expect_warning(synthesize(ldeaths, closeness = 0.5, seed = 1), "not supported")
   expect_warning(augment_data(ldeaths, nsim = 1, closeness = 0.5), "tabular data only")
@@ -97,7 +97,7 @@ test_that("per-variable perturbations leave other variables untouched", {
   fit <- fit_synthesizer(iris)
   a <- generate(fit, seed = 3)
   b <- generate(fit, seed = 3, perturb = perturbation(scale = c(Sepal.Width = 3)))
-  expect_identical(a$Petal.Length, b$Petal.Length)
+  expect_reproducible(a$Petal.Length, b$Petal.Length)
   expect_identical(a$Species, b$Species)
   expect_false(identical(a$Sepal.Width, b$Sepal.Width))
 })
@@ -118,5 +118,5 @@ test_that("generation is reproducible with every control", {
   fit <- fit_synthesizer(census_sim[1:500, ], id_cols = "person_id", by = "sex")
   args <- list(closeness = 0.7, perturb = perturbation(noise = c(income = 0.4), swap = 0.1),
                dependence = 0.8, seed = 11)
-  expect_identical(do.call(generate, c(list(fit), args)), do.call(generate, c(list(fit), args)))
+  expect_reproducible(do.call(generate, c(list(fit), args)), do.call(generate, c(list(fit), args)))
 })

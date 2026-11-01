@@ -76,6 +76,13 @@
   nominal dependence, and the t-copula likelihood.
 * The synthetic missingness-rate test now allows for binomial Monte Carlo
   variation.
+* Tests of reproducibility with a fixed seed compare two runs up to rounding
+  error instead of requiring bit-identical results. Optimised BLAS/LAPACK
+  libraries such as Intel MKL need not return identical results for repeated
+  identical computations; this caused test failures on CRAN's MKL check
+  machine.
+* The SPSS/Stata/SAS round-trip test ignores the `haven_meta` attribute added
+  by forthcoming versions of 'haven' (contributed by Hadley Wickham).
 
 # SynthesizerPlus 0.3.0
 

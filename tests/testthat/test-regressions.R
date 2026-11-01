@@ -121,7 +121,7 @@ test_that("discriminator preprocessing is learned within training folds only", {
   # the AUC is reproducible and in a sensible range
   syn <- synthesize(iris, seed = 1)
   a1 <- discriminator_auc(iris, syn, seed = 2)
-  expect_identical(a1, discriminator_auc(iris, syn, seed = 2))
+  expect_reproducible(a1, discriminator_auc(iris, syn, seed = 2))
   expect_true(a1 > 0.4 && a1 < 0.85)
   x <- as.data.frame(r_mvnorm(400, sigma = diag(3), seed = 1))
   y <- as.data.frame(r_mvnorm(400, sigma = diag(3), seed = 2))
@@ -548,9 +548,9 @@ test_that("fit_synthesizer(seed = ) makes fitting reproducible", {
   for (cop in c("gaussian", "t")) {
     f1 <- fit_synthesizer(d, copula = cop, seed = 42)
     f2 <- fit_synthesizer(d, copula = cop, seed = 42)
-    expect_identical(copula_correlation(f1, include_missing = TRUE),
+    expect_reproducible(copula_correlation(f1, include_missing = TRUE),
                      copula_correlation(f2, include_missing = TRUE))
-    expect_identical(generate(f1, 50, seed = 1), generate(f2, 50, seed = 1))
+    expect_reproducible(generate(f1, 50, seed = 1), generate(f2, 50, seed = 1))
     f3 <- fit_synthesizer(d, copula = cop, seed = 43)
     expect_false(identical(copula_correlation(f1), copula_correlation(f3)))
   }
@@ -560,11 +560,11 @@ test_that("fit_synthesizer(seed = ) makes fitting reproducible", {
   expect_identical(a, b)
   # forwarded by the matrix, vector and stratified paths
   m <- as.matrix(iris[1:4])
-  expect_identical(copula_correlation(fit_synthesizer(m, seed = 3)),
+  expect_reproducible(copula_correlation(fit_synthesizer(m, seed = 3)),
                    copula_correlation(fit_synthesizer(m, seed = 3)))
-  expect_identical(fit_synthesizer(iris$Sepal.Length, seed = 3)$pooled,
+  expect_reproducible(fit_synthesizer(iris$Sepal.Length, seed = 3)$pooled,
                    fit_synthesizer(iris$Sepal.Length, seed = 3)$pooled)
-  expect_identical(fit_synthesizer(iris, by = "Species", seed = 5)$strata,
+  expect_reproducible(fit_synthesizer(iris, by = "Species", seed = 5)$strata,
                    fit_synthesizer(iris, by = "Species", seed = 5)$strata)
   expect_error(fit_synthesizer(iris, seed = NA), "seed")
   expect_error(fit_synthesizer(iris, seed = "a"), "seed")
@@ -574,7 +574,7 @@ test_that("fit_synthesizer.ts(seed = ) is reproducible for every method", {
   for (m in c("copula_var", "block", "stationary", "iid")) {
     f1 <- fit_synthesizer(ldeaths, method = m, seed = 8)
     f2 <- fit_synthesizer(ldeaths, method = m, seed = 8)
-    expect_identical(generate(f1, seed = 2), generate(f2, seed = 2))
+    expect_reproducible(generate(f1, seed = 2), generate(f2, seed = 2))
   }
   set.seed(7); a <- runif(1)
   set.seed(7); fit_synthesizer(ldeaths, seed = 1); b <- runif(1)

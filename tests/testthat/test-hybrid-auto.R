@@ -41,9 +41,9 @@ test_that("automatic engine selection uses reproducible training-only CV", {
     nonlinear_gam_interactions = sel$interactions,
     nonlinear_minbucket = 12L, seed = 5102)
   s1 <- generate(f1, 250L, seed = 5103)
-  expect_identical(s1, generate(manual, 250L, seed = 5103))
-  expect_identical(s1, generate(f1, 250L, seed = 5103))
-  expect_identical(s1, generate(f2, 250L, seed = 5103))
+  expect_reproducible(s1, generate(manual, 250L, seed = 5103))
+  expect_reproducible(s1, generate(f1, 250L, seed = 5103))
+  expect_reproducible(s1, generate(f2, 250L, seed = 5103))
   expect_equal(nrow(s1), 250L)
   expect_true(all(is.finite(s1$y)))
 })

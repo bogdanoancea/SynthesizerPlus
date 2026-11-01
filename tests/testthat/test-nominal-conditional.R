@@ -13,7 +13,7 @@ test_that("nominal model is conditional, unordered and reproducible", {
     expect_false("category" %in% colnames(f$pooled$copula$R))
     a <- generate(f, n = 3000L, seed = 29)
     b <- generate(f, n = 3000L, seed = 29)
-    expect_identical(a, b)
+    expect_reproducible(a, b)
     expect_s3_class(a$category, "factor")
     expect_identical(levels(a$category), levels(d$category))
     expect_equal(sort(unique(as.character(a$category))), sort(unique(as.character(d$category))))

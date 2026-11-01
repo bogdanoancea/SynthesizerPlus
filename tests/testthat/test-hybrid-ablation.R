@@ -20,7 +20,7 @@ test_that("hybrid ablation modes retain default and are reproducible", {
                            nonlinear_calibration = calibration)
       a <- generate(f, 300, seed = 202)
       b <- generate(f, 300, seed = 202)
-      expect_identical(a, b)
+      expect_reproducible(a, b)
       expect_true(all(is.finite(a$y)))
       expect_equal(nrow(a), 300L)
       expect_identical(names(a), names(d))

@@ -90,7 +90,7 @@ test_that("metric helpers handle degenerate inputs", {
   expect_equal(dim(SynthesizerPlus:::.prep_features(data.frame(a = rep(NA_real_, 3)))), c(3L, 0L))
   X <- SynthesizerPlus:::.prep_features(as.data.frame(matrix(rnorm(250), 10)))
   expect_equal(ncol(SynthesizerPlus:::.add_quadratic(X)) - ncol(X), 20L + 190L)
-  expect_identical(SynthesizerPlus:::.add_quadratic(
+  expect_reproducible(SynthesizerPlus:::.add_quadratic(
     SynthesizerPlus:::.prep_features(data.frame(g = c("a", "b", "a")))), 
     SynthesizerPlus:::.prep_features(data.frame(g = c("a", "b", "a"))))
   expect_true(is.matrix(association_matrix(as.matrix(mtcars[1:3]))))

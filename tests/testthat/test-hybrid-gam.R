@@ -16,7 +16,7 @@ test_that("GAM hybrid is opt-in, reproducible, and preserves CART defaults", {
                        nonlinear_engine = "gam", seed = 4102)
   expect_identical(f$pooled$nonlinear$engine, "gam")
   one <- generate(f, 500, seed = 4104)
-  expect_identical(one, generate(f, 500, seed = 4104))
+  expect_reproducible(one, generate(f, 500, seed = 4104))
   expect_named(one, names(d))
   expect_equal(nrow(one), 500L)
   expect_true(all(is.finite(one$y)))
@@ -43,7 +43,7 @@ test_that("GAM hybrid handles missingness, factors, and optional interactions", 
     expect_true(anyNA(s$y))
     expect_true(anyNA(s$x))
     expect_identical(levels(s$group), levels(d$group))
-    expect_identical(s, generate(f, 500, seed = 4203))
+    expect_reproducible(s, generate(f, 500, seed = 4203))
   }
 })
 

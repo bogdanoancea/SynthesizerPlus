@@ -57,7 +57,7 @@ test_that("time series can have any length and a custom start", {
   expect_length(generate(fit, n = 1500, seed = 1), 1500L)
   s <- generate(fit, n = 10, start = 2001)
   expect_equal(start(s)[1], 2001)
-  expect_identical(generate(fit, seed = 3), generate(fit, seed = 3))
+  expect_reproducible(generate(fit, seed = 3), generate(fit, seed = 3))
 })
 
 test_that("missing values are interpolated with a warning", {

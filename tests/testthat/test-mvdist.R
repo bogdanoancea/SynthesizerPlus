@@ -20,7 +20,7 @@ test_that("r_mvnorm() has the right moments", {
   expect_equal(dim(x), c(20000L, 2L))
   expect_equal(colMeans(x), c(1, -1), tolerance = 0.05, ignore_attr = TRUE)
   expect_equal(cov(x), S, tolerance = 0.05, ignore_attr = TRUE)
-  expect_identical(r_mvnorm(5, sigma = S, seed = 2), r_mvnorm(5, sigma = S, seed = 2))
+  expect_reproducible(r_mvnorm(5, sigma = S, seed = 2), r_mvnorm(5, sigma = S, seed = 2))
   # positive semi-definite covariance
   ps <- matrix(1, 2, 2)
   y <- r_mvnorm(100, sigma = ps, seed = 1)

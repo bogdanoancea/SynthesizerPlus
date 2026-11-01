@@ -11,7 +11,7 @@ test_that("augment_data() appends synthetic rows to tabular data", {
   only <- augment_data(train, n = 30, keep_real = FALSE, label = "s", seed = 1)
   expect_equal(nrow(only), 30L)
   expect_true(all(only$s))
-  expect_identical(augment_data(train, n = 10, seed = 2), augment_data(train, n = 10, seed = 2))
+  expect_reproducible(augment_data(train, n = 10, seed = 2), augment_data(train, n = 10, seed = 2))
   strat <- augment_data(iris, n = 300, by = "Species", seed = 1)
   expect_equal(nrow(strat), 450L)
   m <- augment_data(as.matrix(mtcars[, 1:3]), n = 5, seed = 1)

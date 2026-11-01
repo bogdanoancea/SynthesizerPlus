@@ -15,6 +15,11 @@ Main changes (see NEWS.md):
 * The Student-t copula degrees-of-freedom likelihood is evaluated through a
   Cholesky factor; it is algebraically equivalent and gives the same estimates.
 
+This version also fixes the test failures on the MKL check machine reported for
+0.2.9: tests of seeded reproducibility required bit-identical results from two
+runs, which MKL does not guarantee. They now compare the runs up to rounding
+error (relative tolerance 1e-8).
+
 ## Test environments
 
 * Local: Ubuntu Linux, R 4.3.3, `R CMD check --as-cran`.

@@ -168,13 +168,13 @@ test_that("id columns are regenerated", {
 
 test_that("seeds give reproducible output and do not touch the global RNG", {
   fit <- fit_synthesizer(iris)
-  expect_identical(generate(fit, seed = 9), generate(fit, seed = 9))
+  expect_reproducible(generate(fit, seed = 9), generate(fit, seed = 9))
   set.seed(42)
   a <- runif(1)
   set.seed(42)
   generate(fit, seed = 1)
   b <- runif(1)
-  expect_identical(a, b)
+  expect_reproducible(a, b)
   if (exists(".Random.seed", envir = globalenv())) rm(".Random.seed", envir = globalenv())
   generate(fit, seed = 1)
   expect_false(exists(".Random.seed", envir = globalenv()))
@@ -270,7 +270,7 @@ test_that("input validation gives informative errors", {
 test_that("synthesize() fits, generates and can write to a file", {
   s <- synthesize(iris, n = 30, seed = 1)
   expect_equal(nrow(s), 30L)
-  expect_identical(s, synthesize(iris, n = 30, seed = 1))
+  expect_reproducible(s, synthesize(iris, n = 30, seed = 1))
   f <- tempfile(fileext = ".rds")
   on.exit(unlink(f))
   res <- synthesize(iris, n = 20, seed = 1, file = f)
@@ -285,7 +285,7 @@ test_that("simulate() returns multiple synthetic data sets", {
   expect_length(sims, 3L)
   expect_true(all(vapply(sims, nrow, integer(1)) == 10L))
   expect_false(identical(sims[[1]], sims[[2]]))
-  expect_identical(sims, simulate(fit, nsim = 3, seed = 1, n = 10))
+  expect_reproducible(sims, simulate(fit, nsim = 3, seed = 1, n = 10))
 })
 
 test_that("print methods for marginals work", {
